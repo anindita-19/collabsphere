@@ -3,22 +3,24 @@ __pycache__/
 *.py[cod]
 *.pyo
 venv/
-.env
 *.egg-info/
-dist/
-build/
 .pytest_cache/
 
-# Uploads (local file storage)
+# Backend env & uploads
+backend/.env
 backend/uploads/*
 !backend/uploads/.gitkeep
 
 # Node
 node_modules/
 dist/
-.env
-.env.local
-.env.production
+build/
+
+# Frontend env
+frontend/.env
+frontend/.env.local
+frontend/.env.production
+frontend/.env.development
 
 # OS
 .DS_Store

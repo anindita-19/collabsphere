@@ -3,15 +3,12 @@ import { useParams } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  PieChart, Pie, Cell, Legend, LineChart, Line, AreaChart, Area,
+  PieChart, Pie, Cell, Legend,
 } from 'recharts'
 import { RiBarChartLine, RiTeamLine, RiCheckboxCircleLine, RiTimeLine } from 'react-icons/ri'
 import { analyticsAPI, projectsAPI } from '@/services/apiServices'
 import { CardSkeleton } from '@/components/ui/LoadingScreen'
 import Avatar from '@/components/ui/Avatar'
-import useAppStore from '@/store/appStore'
-
-const COLORS = ['#6366f1', '#8b5cf6', '#06b6d4', '#10b981', '#f59e0b', '#ef4444']
 
 const PRIORITY_COLORS = {
   low: '#10b981',
@@ -72,6 +69,7 @@ export default function AnalyticsPage() {
         setAnalytics(wsRes.data)
         setProjectAnalytics(projRes.data)
       })
+      .catch(() => {})
       .finally(() => setLoading(false))
   }, [workspaceId, projectId])
 
@@ -79,33 +77,41 @@ export default function AnalyticsPage() {
     return (
       <div className="max-w-6xl mx-auto space-y-4">
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          {[1,2,3,4].map(i => <CardSkeleton key={i} />)}
+          {[1, 2, 3, 4].map((i) => <CardSkeleton key={i} />)}
         </div>
       </div>
     )
   }
 
-  const taskStatusData = analytics ? [
-    { name: 'To Do', value: analytics.task_counts?.todo || 0, color: '#94a3b8' },
-    { name: 'In Progress', value: analytics.task_counts?.in_progress || 0, color: '#3b82f6' },
-    { name: 'Review', value: analytics.task_counts?.review || 0, color: '#8b5cf6' },
-    { name: 'Completed', value: analytics.task_counts?.completed || 0, color: '#10b981' },
-  ] : []
+  // ── Pie chart: reads task_counts from backend (now correctly returned) ──────
+  const taskStatusData = [
+    { name: 'To Do',       value: analytics?.task_counts?.todo        ?? 0, color: '#94a3b8' },
+    { name: 'In Progress', value: analytics?.task_counts?.in_progress ?? 0, color: '#3b82f6' },
+    { name: 'Review',      value: analytics?.task_counts?.review      ?? 0, color: '#8b5cf6' },
+    { name: 'Completed',   value: analytics?.task_counts?.completed   ?? 0, color: '#10b981' },
+  ]
+  const pieHasData = taskStatusData.some((d) => d.value > 0)
 
-  const priorityData = (projectAnalytics?.priority_counts
+  // ── Priority bar: works from projectAnalytics.priority_counts ────────────
+  const priorityData = projectAnalytics?.priority_counts
     ? Object.entries(projectAnalytics.priority_counts).map(([k, v]) => ({
         name: k.charAt(0).toUpperCase() + k.slice(1),
         count: v,
-        fill: PRIORITY_COLORS[k],
+        fill: PRIORITY_COLORS[k] ?? '#6366f1',
       }))
-    : [])
+    : (analytics?.priority_data ?? []).map((d) => ({
+        name: d.priority.charAt(0).toUpperCase() + d.priority.slice(1),
+        count: d.count,
+        fill: PRIORITY_COLORS[d.priority] ?? '#6366f1',
+      }))
 
-  const projectStatsData = analytics?.project_stats || []
-  const memberStats = analytics?.member_stats || []
+  const projectStatsData = analytics?.project_stats ?? []
+  const memberStats = analytics?.member_stats ?? []
 
   return (
     <div className="max-w-6xl mx-auto space-y-6 animate-fade-in">
-      {/* Stat Cards */}
+
+      {/* ── Stat Cards ──────────────────────────────────────────────────────── */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard
           label="Total Tasks"
@@ -142,7 +148,8 @@ export default function AnalyticsPage() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Task Status Pie */}
+
+        {/* ── Task Status Pie ────────────────────────────────────────────────── */}
         <motion.div
           initial={{ opacity: 0, y: 16 }}
           animate={{ opacity: 1, y: 0 }}
@@ -152,34 +159,41 @@ export default function AnalyticsPage() {
           <h3 className="font-display font-semibold text-surface-900 dark:text-surface-100 mb-4">
             Task Status Distribution
           </h3>
-          <ResponsiveContainer width="100%" height={220}>
-            <PieChart>
-              <Pie
-                data={taskStatusData}
-                cx="50%"
-                cy="50%"
-                innerRadius={55}
-                outerRadius={85}
-                paddingAngle={4}
-                dataKey="value"
-              >
-                {taskStatusData.map((entry, i) => (
-                  <Cell key={i} fill={entry.color} stroke="none" />
-                ))}
-              </Pie>
-              <Tooltip content={<CustomTooltip />} />
-              <Legend
-                iconType="circle"
-                iconSize={8}
-                formatter={(value) => (
-                  <span className="text-xs text-surface-600 dark:text-surface-400">{value}</span>
-                )}
-              />
-            </PieChart>
-          </ResponsiveContainer>
+          {pieHasData ? (
+            <ResponsiveContainer width="100%" height={220}>
+              <PieChart>
+                <Pie
+                  data={taskStatusData}
+                  cx="50%"
+                  cy="50%"
+                  innerRadius={55}
+                  outerRadius={85}
+                  paddingAngle={4}
+                  dataKey="value"
+                >
+                  {taskStatusData.map((entry, i) => (
+                    <Cell key={i} fill={entry.color} stroke="none" />
+                  ))}
+                </Pie>
+                <Tooltip content={<CustomTooltip />} />
+                <Legend
+                  iconType="circle"
+                  iconSize={8}
+                  formatter={(value) => (
+                    <span className="text-xs text-surface-600 dark:text-surface-400">{value}</span>
+                  )}
+                />
+              </PieChart>
+            </ResponsiveContainer>
+          ) : (
+            <div className="h-[220px] flex flex-col items-center justify-center text-surface-400 text-sm gap-2">
+              <span className="text-3xl">📋</span>
+              No tasks yet — create some on the Kanban board
+            </div>
+          )}
         </motion.div>
 
-        {/* Priority Bar Chart */}
+        {/* ── Priority Bar Chart ────────────────────────────────────────────── */}
         <motion.div
           initial={{ opacity: 0, y: 16 }}
           animate={{ opacity: 1, y: 0 }}
@@ -193,7 +207,7 @@ export default function AnalyticsPage() {
             <BarChart data={priorityData} barSize={32}>
               <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.15)" vertical={false} />
               <XAxis dataKey="name" tick={{ fontSize: 11, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
-              <YAxis tick={{ fontSize: 11, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
+              <YAxis tick={{ fontSize: 11, fill: '#94a3b8' }} axisLine={false} tickLine={false} allowDecimals={false} />
               <Tooltip content={<CustomTooltip />} />
               <Bar dataKey="count" name="Tasks" radius={[6, 6, 0, 0]}>
                 {priorityData.map((entry, i) => (
@@ -205,7 +219,7 @@ export default function AnalyticsPage() {
         </motion.div>
       </div>
 
-      {/* Project Completion Chart */}
+      {/* ── Project Progress Overview ────────────────────────────────────────── */}
       {projectStatsData.length > 0 && (
         <motion.div
           initial={{ opacity: 0, y: 16 }}
@@ -220,7 +234,7 @@ export default function AnalyticsPage() {
             <BarChart data={projectStatsData} barGap={4}>
               <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.15)" vertical={false} />
               <XAxis dataKey="name" tick={{ fontSize: 11, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
-              <YAxis tick={{ fontSize: 11, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
+              <YAxis tick={{ fontSize: 11, fill: '#94a3b8' }} axisLine={false} tickLine={false} allowDecimals={false} />
               <Tooltip content={<CustomTooltip />} />
               <Bar dataKey="total" name="Total" fill="#e2e8f0" radius={[4, 4, 0, 0]} />
               <Bar dataKey="completed" name="Completed" fill="#6366f1" radius={[4, 4, 0, 0]} />
@@ -229,7 +243,7 @@ export default function AnalyticsPage() {
         </motion.div>
       )}
 
-      {/* Member Stats */}
+      {/* ── Contributor Workload ─────────────────────────────────────────────── */}
       {memberStats.length > 0 && (
         <motion.div
           initial={{ opacity: 0, y: 16 }}
@@ -273,7 +287,7 @@ export default function AnalyticsPage() {
         </motion.div>
       )}
 
-      {/* Recent Activity from Project */}
+      {/* ── Recent Activity ──────────────────────────────────────────────────── */}
       {projectAnalytics?.recent_activity?.length > 0 && (
         <motion.div
           initial={{ opacity: 0, y: 16 }}

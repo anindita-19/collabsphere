@@ -12,6 +12,13 @@ class Settings(BaseSettings):
     MAX_UPLOAD_SIZE: int = 10485760  # 10MB
     CORS_ORIGINS: str = "http://localhost:5173,http://localhost:3000"
 
+    # Gmail SMTP
+    GMAIL_USER: str = ""
+    GMAIL_APP_PASSWORD: str = ""
+
+    # Frontend URL (for invite links)
+    FRONTEND_URL: str = "http://localhost:5173"
+
     @property
     def cors_origins_list(self) -> List[str]:
         return [o.strip() for o in self.CORS_ORIGINS.split(",")]

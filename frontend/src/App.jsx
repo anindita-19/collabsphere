@@ -1,3 +1,6 @@
+
+import AcceptInvite from '@/pages/AcceptInvite'
+
 import { useEffect, lazy, Suspense } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
 import useAuthStore from '@/store/authStore'
@@ -60,7 +63,7 @@ export default function App() {
           <Route path="/profile" element={<ProfilePage />} />
           <Route path="/settings" element={<SettingsPage />} />
         </Route>
-
+        <Route path="/invite/accept" element={<AcceptInvite />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </Suspense>

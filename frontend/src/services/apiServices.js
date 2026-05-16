@@ -20,6 +20,11 @@ export const workspacesAPI = {
   inviteMember: (id, data) => api.post(`/workspaces/${id}/invite`, data),
   removeMember: (wsId, userId) => api.delete(`/workspaces/${wsId}/members/${userId}`),
   getActivity: (id, limit = 50) => api.get(`/workspaces/${id}/activity`, { params: { limit } }),
+  // Validate an invite token (public, no auth needed)
+  getInvite: (token) => api.get(`/workspaces/invite/accept?token=${token}`),
+ 
+  // Accept the invite (must be authenticated)
+  acceptInvite: (token) => api.post(`/workspaces/invite/accept?token=${token}`),
 }
 
 // ── Projects ──────────────────────────────────────────────────────────────────

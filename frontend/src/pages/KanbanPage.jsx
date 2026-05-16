@@ -3,13 +3,13 @@ import { useParams } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import toast from 'react-hot-toast'
 import {
-  DndContext, DragOverlay, closestCorners, PointerSensor, useSensor, useSensors,
+  DndContext, DragOverlay, closestCorners, PointerSensor, useSensor, useSensors, useDroppable,
 } from '@dnd-kit/core'
 import {
-  SortableContext, verticalListSortingStrategy, arrayMove, useSortable,
+  SortableContext, verticalListSortingStrategy, useSortable,
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import { RiAddLine, RiMore2Line, RiEditLine, RiDeleteBinLine, RiAttachmentLine, RiMessage2Line } from 'react-icons/ri'
+import { RiAddLine, RiDeleteBinLine, RiAttachmentLine, RiMessage2Line } from 'react-icons/ri'
 import { tasksAPI } from '@/services/apiServices'
 import { useWebSocket } from '@/hooks/useWebSocket'
 import useAuthStore from '@/store/authStore'
@@ -32,7 +32,6 @@ export default function KanbanPage() {
   const { user } = useAuthStore()
   const [tasks, setTasks] = useState([])
   const [loading, setLoading] = useState(true)
-  const [activeTask, setActiveTask] = useState(null)
   const [draggingTask, setDraggingTask] = useState(null)
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [createStatus, setCreateStatus] = useState('todo')
@@ -40,7 +39,7 @@ export default function KanbanPage() {
   const [filters, setFilters] = useState({ priority: '', search: '' })
 
   const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
   )
 
   const loadTasks = useCallback(async () => {
@@ -50,7 +49,7 @@ export default function KanbanPage() {
         search: filters.search || undefined,
       })
       setTasks(res.data)
-    } catch (err) {
+    } catch {
       toast.error('Failed to load tasks')
     } finally {
       setLoading(false)
@@ -65,9 +64,6 @@ export default function KanbanPage() {
     }
   })
 
-  const getColumnTasks = (status) =>
-    tasks.filter((t) => t.status === status).sort((a, b) => a.position - b.position)
-
   const handleDragStart = ({ active }) => {
     const task = tasks.find((t) => t.id === active.id)
     setDraggingTask(task || null)
@@ -81,21 +77,26 @@ export default function KanbanPage() {
     const task = tasks.find((t) => t.id === taskId)
     if (!task) return
 
-    // Determine target column
-    let targetStatus = task.status
-    const overTask = tasks.find((t) => t.id === over.id)
-    if (overTask) {
-      targetStatus = overTask.status
-    } else if (COLUMNS.find((c) => c.id === over.id)) {
-      targetStatus = over.id
-    }
+    // over.id is either a column id or a task id
+    const overIsColumn = COLUMNS.some((c) => c.id === over.id)
+    const overTask = !overIsColumn ? tasks.find((t) => t.id === over.id) : null
+    const targetStatus = overIsColumn ? over.id : (overTask?.status ?? task.status)
 
-    const columnTasks = getColumnTasks(targetStatus)
-    const targetIndex = overTask ? columnTasks.findIndex((t) => t.id === over.id) : columnTasks.length
+    if (targetStatus === task.status && !overTask) return // dropped in same column, no target task
+
+    const columnTasks = tasks
+      .filter((t) => t.status === targetStatus && t.id !== taskId)
+      .sort((a, b) => a.position - b.position)
+
+    const targetIndex = overTask
+      ? columnTasks.findIndex((t) => t.id === over.id)
+      : columnTasks.length
 
     // Optimistic update
     setTasks((prev) =>
-      prev.map((t) => t.id === taskId ? { ...t, status: targetStatus, position: targetIndex } : t)
+      prev.map((t) =>
+        t.id === taskId ? { ...t, status: targetStatus, position: targetIndex } : t
+      )
     )
 
     try {
@@ -109,7 +110,7 @@ export default function KanbanPage() {
   const handleTaskSaved = (task) => {
     setTasks((prev) => {
       const exists = prev.find((t) => t.id === task.id)
-      if (exists) return prev.map((t) => t.id === task.id ? task : t)
+      if (exists) return prev.map((t) => (t.id === task.id ? task : t))
       return [task, ...prev]
     })
     setShowCreateModal(false)
@@ -155,7 +156,12 @@ export default function KanbanPage() {
           <option value="urgent">Urgent</option>
         </select>
         <div className="ml-auto flex items-center gap-2">
-          {isConnected && <span className="text-xs text-emerald-500 flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />Live</span>}
+          {isConnected && (
+            <span className="text-xs text-emerald-500 flex items-center gap-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+              Live
+            </span>
+          )}
           <button
             onClick={() => { setCreateStatus('todo'); setShowCreateModal(true) }}
             className="btn-primary"
@@ -190,9 +196,9 @@ export default function KanbanPage() {
           })}
         </div>
 
-        <DragOverlay>
+        <DragOverlay dropAnimation={{ duration: 200, easing: 'ease' }}>
           {draggingTask && (
-            <div className="opacity-90 rotate-2 scale-105">
+            <div className="opacity-90 rotate-1 scale-105">
               <TaskCard task={draggingTask} isDragging />
             </div>
           )}
@@ -203,6 +209,7 @@ export default function KanbanPage() {
         <TaskModal
           projectId={projectId}
           task={null}
+          defaultStatus={createStatus}
           onClose={() => setShowCreateModal(false)}
           onSaved={handleTaskSaved}
         />
@@ -222,14 +229,21 @@ export default function KanbanPage() {
   )
 }
 
+// ── Column ────────────────────────────────────────────────────────────────────
+
 function KanbanColumn({ column, tasks, loading, onAddTask, onTaskClick, onTaskDelete }) {
+  // Register the column itself as a droppable so empty columns accept drops
+  const { setNodeRef: setDropRef, isOver } = useDroppable({ id: column.id })
+
   return (
     <div className="flex-shrink-0 w-72 flex flex-col">
       {/* Column header */}
       <div className="flex items-center justify-between px-3 py-2.5 mb-3">
         <div className="flex items-center gap-2">
           <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: column.color }} />
-          <span className="font-semibold text-surface-700 dark:text-surface-300 text-sm">{column.label}</span>
+          <span className="font-semibold text-surface-700 dark:text-surface-300 text-sm">
+            {column.label}
+          </span>
           <span className="bg-surface-100 dark:bg-surface-800 text-surface-500 text-xs px-2 py-0.5 rounded-full font-medium">
             {tasks.length}
           </span>
@@ -242,9 +256,16 @@ function KanbanColumn({ column, tasks, loading, onAddTask, onTaskClick, onTaskDe
         </button>
       </div>
 
-      {/* Task list */}
+      {/* Task list — attached to both the droppable ref and sortable context */}
       <SortableContext items={tasks.map((t) => t.id)} strategy={verticalListSortingStrategy}>
-        <div className="flex-1 rounded-xl bg-surface-100/50 dark:bg-surface-800/30 p-2 space-y-2 min-h-32 overflow-y-auto max-h-[calc(100vh-280px)]">
+        <div
+          ref={setDropRef}
+          className={`flex-1 rounded-xl p-2 space-y-2 min-h-32 overflow-y-auto max-h-[calc(100vh-280px)] transition-colors duration-150 ${
+            isOver
+              ? 'bg-primary-50 dark:bg-primary-900/20 ring-2 ring-primary-400/40'
+              : 'bg-surface-100/50 dark:bg-surface-800/30'
+          }`}
+        >
           {loading ? (
             <>
               <TaskCardSkeleton />
@@ -277,8 +298,17 @@ function KanbanColumn({ column, tasks, loading, onAddTask, onTaskClick, onTaskDe
   )
 }
 
+// ── Task card ─────────────────────────────────────────────────────────────────
+
 function TaskCard({ task, onClick, onDelete, isDragging = false }) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging: isSortableDragging } = useSortable({ id: task.id })
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging: isSortableDragging,
+  } = useSortable({ id: task.id })
 
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -290,14 +320,18 @@ function TaskCard({ task, onClick, onDelete, isDragging = false }) {
     <div
       ref={setNodeRef}
       style={style}
-      {...attributes}
-      {...listeners}
-      onClick={onClick}
-      className={`bg-white dark:bg-surface-800 rounded-xl border border-surface-200 dark:border-surface-700 p-3 cursor-pointer hover:shadow-md hover:-translate-y-0.5 transition-all duration-150 group ${isDragging ? 'shadow-xl' : ''}`}
+      className={`bg-white dark:bg-surface-800 rounded-xl border border-surface-200 dark:border-surface-700 p-3 hover:shadow-md transition-all duration-150 group ${
+        isDragging ? 'shadow-xl' : ''
+      }`}
     >
-      {/* Priority indicator */}
       <div className="flex items-start justify-between gap-2 mb-2">
-        <p className="text-sm font-medium text-surface-900 dark:text-surface-100 leading-snug flex-1 line-clamp-2">
+        {/* Drag handle + title — listeners only on this area */}
+        <p
+          {...attributes}
+          {...listeners}
+          onClick={onClick}
+          className="text-sm font-medium text-surface-900 dark:text-surface-100 leading-snug flex-1 line-clamp-2 cursor-grab active:cursor-grabbing"
+        >
           {task.title}
         </p>
         {onDelete && (
@@ -311,20 +345,24 @@ function TaskCard({ task, onClick, onDelete, isDragging = false }) {
       </div>
 
       {task.description && (
-        <p className="text-xs text-surface-400 dark:text-surface-500 mb-2 line-clamp-1">{task.description}</p>
+        <p className="text-xs text-surface-400 dark:text-surface-500 mb-2 line-clamp-1">
+          {task.description}
+        </p>
       )}
 
       <div className="flex items-center gap-1.5 flex-wrap mb-2">
         <PriorityBadge priority={task.priority} />
         {task.tags?.slice(0, 2).map((tag) => (
-          <span key={tag} className="badge bg-primary-50 dark:bg-primary-900/20 text-primary-600 dark:text-primary-400">
+          <span
+            key={tag}
+            className="badge bg-primary-50 dark:bg-primary-900/20 text-primary-600 dark:text-primary-400"
+          >
             {tag}
           </span>
         ))}
       </div>
 
       <div className="flex items-center justify-between mt-2">
-        {/* Assignees */}
         <div className="flex -space-x-1.5">
           {task.assignee_details?.slice(0, 3).map((a) => (
             <Avatar key={a.id} name={a.full_name} color={a.avatar_color} size="xs" />

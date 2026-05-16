@@ -3,9 +3,9 @@ import { useParams, useNavigate, NavLink } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import toast from 'react-hot-toast'
 import {
-  RiLayoutKanbanLine, RiBarChartLine, RiFileTextLine,
-  RiSettings3Line, RiTrashLine, RiArrowLeftLine,
-  RiEditLine, RiCalendarLine, RiTimeLine,
+  RiKanbanView, RiBarChartLine, RiFileTextLine,
+  RiSettings3Line, RiDeleteBinLine, RiArrowLeftLine,
+  RiEditLine, RiCalendarLine, RiHistoryLine,
 } from 'react-icons/ri'
 import { projectsAPI } from '@/services/apiServices'
 import ProjectModal from '@/components/ui/ProjectModal'
@@ -79,7 +79,7 @@ export default function ProjectPage() {
               Edit
             </button>
             <button onClick={handleDelete} className="btn-ghost text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20">
-              <RiTrashLine size={15} />
+              <RiDeleteBinLine size={15} />
             </button>
           </div>
         </div>
@@ -127,7 +127,7 @@ export default function ProjectPage() {
       {/* Sub-navigation */}
       <div className="flex items-center gap-1 border-b border-surface-200 dark:border-surface-800">
         {[
-          { label: 'Kanban Board', path: 'kanban', icon: RiLayoutKanbanLine },
+          { label: 'Kanban Board', path: 'kanban', icon: RiKanbanView },
           { label: 'Analytics', path: 'analytics', icon: RiBarChartLine },
           { label: 'Documents', path: 'docs', icon: RiFileTextLine },
         ].map((tab) => (

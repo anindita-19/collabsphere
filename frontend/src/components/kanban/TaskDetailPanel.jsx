@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import {
   RiCloseLine, RiEditLine, RiDeleteBinLine, RiSendPlaneLine,
-  RiAttachmentLine, RiDownload2Line, RiTrashLine, RiTimeLine,
+  RiAttachmentLine, RiDownload2Line, RiHistoryLine,
 } from 'react-icons/ri'
 import { tasksAPI, filesAPI } from '@/services/apiServices'
 import useAuthStore from '@/store/authStore'
@@ -126,7 +126,7 @@ export default function TaskDetailPanel({ task, projectId, workspaceId, onClose,
             <div className="space-y-2 text-sm">
               {task.due_date && (
                 <div className="flex items-center gap-2 text-surface-500">
-                  <RiTimeLine size={14} />
+                  <RiHistoryLine size={14} />
                   Due: <span className={new Date(task.due_date) < new Date() ? 'text-red-500' : ''}>{formatDate(task.due_date)}</span>
                 </div>
               )}
@@ -188,7 +188,7 @@ export default function TaskDetailPanel({ task, projectId, workspaceId, onClose,
                       onClick={() => handleDeleteFile(f.id)}
                       className="p-1 rounded text-surface-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all"
                     >
-                      <RiTrashLine size={14} />
+                      <RiDeleteBinLine size={14} />
                     </button>
                   )}
                 </div>
@@ -216,7 +216,7 @@ export default function TaskDetailPanel({ task, projectId, workspaceId, onClose,
                             onClick={() => handleDeleteComment(c.id)}
                             className="p-0.5 rounded text-surface-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all"
                           >
-                            <RiTrashLine size={12} />
+                            <RiDeleteBinLine size={12} />
                           </button>
                         )}
                       </div>

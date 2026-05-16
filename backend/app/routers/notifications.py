@@ -1,10 +1,81 @@
-from fastapi import APIRouter, HTTPException, Depends
+import logging
+import httpx
+import os
+from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
 from bson import ObjectId
 from app.database import get_db
 from app.schemas.schemas import ChatMessage, NotificationMarkRead
 from app.utils.helpers import serialize_doc, utc_now
 from app.middleware.auth_middleware import get_current_user
 from app.websocket.manager import manager
+
+logger = logging.getLogger(__name__)
+
+RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
+FROM_EMAIL = os.getenv("FROM_EMAIL", "notifications@yourdomain.com")  # Must be a verified Resend domain
+
+# ── Email helper ──────────────────────────────────────────────────────────────
+
+async def send_notification_email(to_email: str, subject: str, body: str):
+    """Send an email via Resend. Silently logs on failure — never crashes the request."""
+    if not RESEND_API_KEY:
+        return
+    try:
+        async with httpx.AsyncClient() as client:
+            res = await client.post(
+                "https://api.resend.com/emails",
+                headers={"Authorization": f"Bearer {RESEND_API_KEY}"},
+                json={
+                    "from": FROM_EMAIL,
+                    "to": [to_email],
+                    "subject": subject,
+                    "html": f"<p>{body}</p><br><small>CollabSphere Notification</small>",
+                },
+                timeout=10,
+            )
+            if res.status_code not in (200, 201):
+                logger.warning(f"Resend returned {res.status_code}: {res.text}")
+    except Exception as e:
+        logger.warning(f"Email send failed (non-fatal): {e}")
+
+
+async def create_notification(db, *, user_id: str, user_email: str, title: str,
+                               message: str, type: str, workspace_id: str = None,
+                               project_id: str = None, task_id: str = None):
+    """
+    Create an in-app notification and send an email.
+    Import and call this from tasks.py / workspaces.py wherever you create notifications.
+    """
+    notif_doc = {
+        "user_id": user_id,
+        "title": title,
+        "message": message,
+        "type": type,
+        "workspace_id": workspace_id,
+        "project_id": project_id,
+        "task_id": task_id,
+        "read": False,
+        "created_at": utc_now(),
+    }
+    result = await db.notifications.insert_one(notif_doc)
+    notif_doc["_id"] = result.inserted_id
+
+    # Push in-app via WebSocket
+    if workspace_id:
+        await manager.broadcast_to_workspace(workspace_id, {
+            "type": "notification",
+            "notification": serialize_doc(notif_doc),
+        })
+
+    # Send email (non-blocking, non-fatal)
+    await send_notification_email(
+        to_email=user_email,
+        subject=f"CollabSphere: {title}",
+        body=message,
+    )
+
+    return serialize_doc(notif_doc)
+
 
 # ── Notifications ─────────────────────────────────────────────────────────────
 
@@ -54,7 +125,6 @@ async def mark_notifications_read(
             {"$set": {"read": True}},
         )
     else:
-        # Mark all as read
         await db.notifications.update_many(
             {"user_id": current_user["id"]},
             {"$set": {"read": True}},
@@ -130,7 +200,6 @@ async def send_chat_message(
     msg_doc["_id"] = result.inserted_id
     msg = serialize_doc(msg_doc)
 
-    # Broadcast via WebSocket
     await manager.broadcast_to_workspace(workspace_id, {
         "type": "chat_message",
         "message": msg,
@@ -162,19 +231,27 @@ async def get_workspace_analytics(
     async for p in db.projects.find({"workspace_id": workspace_id}):
         project_ids.append(str(p["_id"]))
 
+    # ── Task counts by status ─────────────────────────────────────────────────
     total_tasks = await db.tasks.count_documents({"project_id": {"$in": project_ids}})
+    todo_tasks = await db.tasks.count_documents({
+        "project_id": {"$in": project_ids}, "status": "todo"
+    })
+    in_progress_tasks = await db.tasks.count_documents({
+        "project_id": {"$in": project_ids}, "status": "in_progress"
+    })
+    review_tasks = await db.tasks.count_documents({
+        "project_id": {"$in": project_ids}, "status": "review"
+    })
     completed_tasks = await db.tasks.count_documents({
         "project_id": {"$in": project_ids}, "status": "completed"
     })
-    in_progress = await db.tasks.count_documents({
-        "project_id": {"$in": project_ids}, "status": "in_progress"
-    })
+
     total_projects = len(project_ids)
     active_projects = await db.projects.count_documents({
         "workspace_id": workspace_id, "status": "active"
     })
 
-    # Member stats
+    # ── Member stats ──────────────────────────────────────────────────────────
     member_stats = []
     for m in ws.get("members", []):
         task_count = await db.tasks.count_documents({
@@ -194,7 +271,7 @@ async def get_workspace_analytics(
             "completed": completed,
         })
 
-    # Task by priority
+    # ── Priority breakdown ────────────────────────────────────────────────────
     priority_data = []
     for priority in ["low", "medium", "high", "urgent"]:
         count = await db.tasks.count_documents({
@@ -202,7 +279,7 @@ async def get_workspace_analytics(
         })
         priority_data.append({"priority": priority, "count": count})
 
-    # Project stats for chart
+    # ── Project progress ──────────────────────────────────────────────────────
     project_stats = []
     async for p in db.projects.find({"workspace_id": workspace_id}):
         pid = str(p["_id"])
@@ -217,15 +294,26 @@ async def get_workspace_analytics(
 
     completion_rate = round(completed_tasks / max(total_tasks, 1) * 100, 1)
 
+    # online_users: only count users actually in this workspace
+    online_user_ids = manager.get_online_users(workspace_id)
+    online_count = len([uid for uid in online_user_ids if uid in member_ids])
+
     return {
         "total_tasks": total_tasks,
         "completed_tasks": completed_tasks,
-        "in_progress": in_progress,
+        "in_progress": in_progress_tasks,
+        # ← This is what the frontend pie chart needs
+        "task_counts": {
+            "todo": todo_tasks,
+            "in_progress": in_progress_tasks,
+            "review": review_tasks,
+            "completed": completed_tasks,
+        },
         "total_projects": total_projects,
         "active_projects": active_projects,
         "completion_rate": completion_rate,
         "member_count": len(ws.get("members", [])),
-        "online_users": len(manager.get_online_users(workspace_id)),
+        "online_users": online_count,
         "member_stats": member_stats,
         "priority_data": priority_data,
         "project_stats": project_stats,

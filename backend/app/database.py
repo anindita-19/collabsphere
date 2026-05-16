@@ -76,6 +76,15 @@ async def create_indexes():
         # Docs
         await db.documents.create_index([("project_id", ASCENDING)])
 
+        # Pending invites
+        await db.pending_invites.create_index([("token", ASCENDING)], unique=True)
+        await db.pending_invites.create_index([("workspace_id", ASCENDING)])
+        await db.pending_invites.create_index([("email", ASCENDING)])
+        await db.pending_invites.create_index(
+            [("expires_at", ASCENDING)],
+            expireAfterSeconds=0  # TTL index — MongoDB auto-deletes expired invites
+        )
+
         logger.info("Database indexes created successfully")
     except Exception as e:
         logger.error(f"Error creating indexes: {e}")

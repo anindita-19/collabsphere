@@ -10,16 +10,24 @@ from app.config import settings
 
 router = APIRouter(prefix="/files", tags=["Files"])
 
-ALLOWED_TYPES = {
-    "image/jpeg", "image/png", "image/gif", "image/webp",
-    "application/pdf",
-    "text/plain", "text/csv", "text/markdown",
-    "application/msword",
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    "application/vnd.ms-excel",
-    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    "application/zip",
+ALLOWED_EXTENSIONS = {
+    ".jpg", ".jpeg", ".png", ".gif", ".webp",
+    ".pdf",
+    ".txt", ".csv", ".md", ".markdown",
+    ".doc", ".docx",
+    ".xls", ".xlsx",
+    ".zip", ".rar", ".7z",
+    ".mp4", ".mov", ".avi",
+    ".mp3", ".wav",
+    ".ppt", ".pptx",
+    ".json", ".xml", ".yaml", ".yml",
+    ".py", ".js", ".ts", ".html", ".css",
 }
+
+
+def is_allowed_file(filename: str) -> bool:
+    ext = os.path.splitext(filename)[-1].lower()
+    return ext in ALLOWED_EXTENSIONS
 
 
 @router.post("/upload")
@@ -31,8 +39,10 @@ async def upload_file(
     current_user=Depends(get_current_user),
     db=Depends(get_db),
 ):
-    if file.content_type not in ALLOWED_TYPES:
-        raise HTTPException(status_code=400, detail=f"File type {file.content_type} not allowed")
+    # Validate by extension instead of MIME type — browsers report MIME inconsistently
+    if not is_allowed_file(file.filename):
+        ext = os.path.splitext(file.filename)[-1].lower() or "(no extension)"
+        raise HTTPException(status_code=400, detail=f"File type {ext} not allowed")
 
     # Read file content
     content = await file.read()
@@ -51,7 +61,7 @@ async def upload_file(
     file_doc = {
         "original_name": file.filename,
         "stored_name": unique_name,
-        "content_type": file.content_type,
+        "content_type": file.content_type or "application/octet-stream",
         "size": len(content),
         "task_id": task_id,
         "project_id": project_id,
