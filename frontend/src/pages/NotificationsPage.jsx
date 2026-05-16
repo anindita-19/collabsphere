@@ -1,9 +1,8 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { RiBellLine, RiCheckDoubleLine, RiDeleteBinLine } from 'react-icons/ri'
 import { notificationsAPI } from '@/services/apiServices'
 import useAppStore from '@/store/appStore'
-import { useWebSocket } from '@/hooks/useWebSocket'
 import EmptyState from '@/components/ui/EmptyState'
 import { formatRelative } from '@/utils/helpers'
 import toast from 'react-hot-toast'
@@ -20,25 +19,38 @@ const TYPE_CONFIG = {
 
 export default function NotificationsPage() {
   const { setUnreadCount } = useAppStore()
-  const { activeWorkspace } = useAppStore()
   const [notifications, setNotifications] = useState([])
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState('all')
 
-  const fetchNotifications = () => {
-    notificationsAPI.getAll()
-      .then((r) => setNotifications(r.data))
-      .finally(() => setLoading(false))
-  }
-
-  useEffect(() => { fetchNotifications() }, [])
-
-  // Re-fetch whenever a new notification arrives via WebSocket
-  useWebSocket(activeWorkspace?.id, (msg) => {
-    if (msg.type === 'notification') {
-      fetchNotifications()
+  const fetchNotifications = useCallback(async () => {
+    try {
+      const r = await notificationsAPI.getAll()
+      const data = r.data ?? []
+      setNotifications(data)
+      // Always sync the bell badge to ground truth from DB
+      setUnreadCount(data.filter((n) => !n.read).length)
+    } catch {
+      // fail silently, keep existing state
+    } finally {
+      setLoading(false)
     }
-  })
+  }, [setUnreadCount])
+
+  // Fetch on mount
+  useEffect(() => {
+    fetchNotifications()
+  }, [fetchNotifications])
+
+  // Re-fetch when user tabs back in — catches any notifications that
+  // arrived while this tab was in the background or from another session
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') fetchNotifications()
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => document.removeEventListener('visibilitychange', onVisible)
+  }, [fetchNotifications])
 
   const markAllRead = async () => {
     await notificationsAPI.markRead({ notification_ids: [] })
@@ -72,7 +84,6 @@ export default function NotificationsPage() {
 
   return (
     <div className="max-w-2xl mx-auto space-y-5 animate-fade-in">
-      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="font-display font-bold text-xl text-surface-900 dark:text-surface-100">
@@ -90,7 +101,6 @@ export default function NotificationsPage() {
         )}
       </div>
 
-      {/* Filter tabs */}
       <div className="flex gap-1 border-b border-surface-200 dark:border-surface-800">
         {['all', 'unread', 'read'].map((f) => (
           <button
@@ -112,10 +122,9 @@ export default function NotificationsPage() {
         ))}
       </div>
 
-      {/* Notifications list */}
       {loading ? (
         <div className="space-y-3">
-          {[1,2,3,4].map(i => (
+          {[1, 2, 3, 4].map((i) => (
             <div key={i} className="card p-4 animate-pulse flex gap-3">
               <div className="w-10 h-10 rounded-full bg-surface-200 dark:bg-surface-700 flex-shrink-0" />
               <div className="flex-1 space-y-2">
