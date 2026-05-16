@@ -23,8 +23,8 @@ export default function TaskDetailPanel({ task, projectId, workspaceId, onClose,
 
   useEffect(() => {
     if (!task?.id) return
-    tasksAPI.getComments(projectId, task.id).then((r) => setComments(r.data))
-    filesAPI.getTaskFiles(task.id).then((r) => setFiles(r.data))
+    tasksAPI.getComments(projectId, task.id).then((r) => setComments(r.data)).catch(() => {})
+    filesAPI.getTaskFiles(task.id).then((r) => setFiles(r.data)).catch(() => {})
   }, [task?.id])
 
   const handleComment = async (e) => {
@@ -55,14 +55,18 @@ export default function TaskDetailPanel({ task, projectId, workspaceId, onClose,
     const file = e.target.files?.[0]
     if (!file) return
     setUploading(true)
+
     const formData = new FormData()
     formData.append('file', file)
-    formData.append('task_id', task.id)
-    formData.append('project_id', projectId)
-    formData.append('workspace_id', workspaceId)
+
     try {
-      const res = await filesAPI.upload(formData)
-      setFiles((prev) => [...prev, res.data])
+      // Pass IDs as query params — backend reads them from query string
+      const res = await filesAPI.upload(formData, {
+        taskId: task.id,
+        projectId,
+        workspaceId,
+      })
+      setFiles((prev) => [res.data, ...prev])
       toast.success('File uploaded!')
     } catch (err) {
       toast.error(err?.response?.data?.detail || 'Upload failed')
@@ -76,10 +80,14 @@ export default function TaskDetailPanel({ task, projectId, workspaceId, onClose,
     try {
       await filesAPI.delete(fileId)
       setFiles((prev) => prev.filter((f) => f.id !== fileId))
+      toast.success('File deleted')
     } catch {
       toast.error('Failed to delete file')
     }
   }
+
+  // Get the best URL for a file — Cloudinary URL if available, else download endpoint
+  const getFileUrl = (f) => f.url || filesAPI.download(f.id)
 
   return (
     <>
@@ -102,13 +110,22 @@ export default function TaskDetailPanel({ task, projectId, workspaceId, onClose,
             <StatusBadge status={task.status} />
           </div>
           <div className="flex items-center gap-1">
-            <button onClick={() => setShowEdit(true)} className="p-1.5 rounded-lg hover:bg-surface-100 dark:hover:bg-surface-800 text-surface-400 transition-colors">
+            <button
+              onClick={() => setShowEdit(true)}
+              className="p-1.5 rounded-lg hover:bg-surface-100 dark:hover:bg-surface-800 text-surface-400 transition-colors"
+            >
               <RiEditLine size={16} />
             </button>
-            <button onClick={onDeleted} className="p-1.5 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 text-surface-400 hover:text-red-500 transition-colors">
+            <button
+              onClick={onDeleted}
+              className="p-1.5 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 text-surface-400 hover:text-red-500 transition-colors"
+            >
               <RiDeleteBinLine size={16} />
             </button>
-            <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-surface-100 dark:hover:bg-surface-800 text-surface-400 transition-colors">
+            <button
+              onClick={onClose}
+              className="p-1.5 rounded-lg hover:bg-surface-100 dark:hover:bg-surface-800 text-surface-400 transition-colors"
+            >
               <RiCloseLine size={18} />
             </button>
           </div>
@@ -121,31 +138,43 @@ export default function TaskDetailPanel({ task, projectId, workspaceId, onClose,
               {task.title}
             </h2>
             {task.description && (
-              <p className="text-surface-600 dark:text-surface-400 text-sm leading-relaxed mb-4">{task.description}</p>
+              <p className="text-surface-600 dark:text-surface-400 text-sm leading-relaxed mb-4">
+                {task.description}
+              </p>
             )}
             <div className="space-y-2 text-sm">
               {task.due_date && (
                 <div className="flex items-center gap-2 text-surface-500">
                   <RiHistoryLine size={14} />
-                  Due: <span className={new Date(task.due_date) < new Date() ? 'text-red-500' : ''}>{formatDate(task.due_date)}</span>
+                  Due:{' '}
+                  <span className={new Date(task.due_date) < new Date() ? 'text-red-500' : ''}>
+                    {formatDate(task.due_date)}
+                  </span>
                 </div>
               )}
               {task.tags?.length > 0 && (
                 <div className="flex flex-wrap gap-1">
                   {task.tags.map((tag) => (
-                    <span key={tag} className="badge bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-400">{tag}</span>
+                    <span
+                      key={tag}
+                      className="badge bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-400"
+                    >
+                      {tag}
+                    </span>
                   ))}
                 </div>
               )}
             </div>
 
-            {/* Assignees */}
             {task.assignee_details?.length > 0 && (
               <div className="mt-4">
                 <p className="text-xs text-surface-400 mb-2">Assignees</p>
                 <div className="flex flex-wrap gap-2">
                   {task.assignee_details.map((a) => (
-                    <div key={a.id} className="flex items-center gap-2 px-2 py-1 rounded-full bg-surface-100 dark:bg-surface-800">
+                    <div
+                      key={a.id}
+                      className="flex items-center gap-2 px-2 py-1 rounded-full bg-surface-100 dark:bg-surface-800"
+                    >
                       <Avatar name={a.full_name} color={a.avatar_color} size="xs" />
                       <span className="text-xs text-surface-700 dark:text-surface-300">{a.full_name}</span>
                     </div>
@@ -164,36 +193,51 @@ export default function TaskDetailPanel({ task, projectId, workspaceId, onClose,
               </h3>
               <label className="cursor-pointer text-xs text-primary-600 hover:text-primary-700 font-medium">
                 {uploading ? 'Uploading...' : '+ Upload'}
-                <input type="file" className="hidden" onChange={handleFileUpload} disabled={uploading} />
+                <input
+                  type="file"
+                  className="hidden"
+                  onChange={handleFileUpload}
+                  disabled={uploading}
+                />
               </label>
             </div>
             <div className="space-y-2">
-              {files.map((f) => (
-                <div key={f.id} className="flex items-center gap-2 p-2 rounded-lg bg-surface-50 dark:bg-surface-800 group">
-                  <span className="text-lg">{getFileIcon(f.content_type)}</span>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-xs font-medium text-surface-900 dark:text-surface-100 truncate">{f.original_name}</p>
-                    <p className="text-[10px] text-surface-400">{formatFileSize(f.size)}</p>
-                  </div>
-                  <a
-                    href={filesAPI.download(f.id)}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="p-1 rounded text-surface-400 hover:text-primary-600 transition-colors"
+              {files.length === 0 ? (
+                <p className="text-xs text-surface-400">No files attached</p>
+              ) : (
+                files.map((f) => (
+                  <div
+                    key={f.id}
+                    className="flex items-center gap-2 p-2 rounded-lg bg-surface-50 dark:bg-surface-800 group"
                   >
-                    <RiDownload2Line size={14} />
-                  </a>
-                  {f.uploaded_by === user?.id && (
-                    <button
-                      onClick={() => handleDeleteFile(f.id)}
-                      className="p-1 rounded text-surface-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all"
+                    <span className="text-lg">{getFileIcon(f.content_type)}</span>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-medium text-surface-900 dark:text-surface-100 truncate">
+                        {f.original_name}
+                      </p>
+                      <p className="text-[10px] text-surface-400">{formatFileSize(f.size)}</p>
+                    </div>
+                    <a
+                      href={getFileUrl(f)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="p-1 rounded text-surface-400 hover:text-primary-600 transition-colors"
+                      title="Download"
                     >
-                      <RiDeleteBinLine size={14} />
-                    </button>
-                  )}
-                </div>
-              ))}
-              {files.length === 0 && <p className="text-xs text-surface-400">No files attached</p>}
+                      <RiDownload2Line size={14} />
+                    </a>
+                    {f.uploaded_by === user?.id && (
+                      <button
+                        onClick={() => handleDeleteFile(f.id)}
+                        className="p-1 rounded text-surface-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all"
+                        title="Delete file"
+                      >
+                        <RiDeleteBinLine size={14} />
+                      </button>
+                    )}
+                  </div>
+                ))
+              )}
             </div>
           </div>
 
@@ -208,7 +252,9 @@ export default function TaskDetailPanel({ task, projectId, workspaceId, onClose,
                   <Avatar name={c.author?.full_name} color={c.author?.avatar_color} size="sm" />
                   <div className="flex-1">
                     <div className="flex items-center justify-between">
-                      <p className="text-xs font-medium text-surface-900 dark:text-surface-100">{c.author?.full_name}</p>
+                      <p className="text-xs font-medium text-surface-900 dark:text-surface-100">
+                        {c.author?.full_name}
+                      </p>
                       <div className="flex items-center gap-1">
                         <span className="text-[10px] text-surface-400">{formatRelative(c.created_at)}</span>
                         {c.user_id === user?.id && (
@@ -221,7 +267,9 @@ export default function TaskDetailPanel({ task, projectId, workspaceId, onClose,
                         )}
                       </div>
                     </div>
-                    <p className="text-sm text-surface-700 dark:text-surface-300 mt-0.5 leading-relaxed">{c.content}</p>
+                    <p className="text-sm text-surface-700 dark:text-surface-300 mt-0.5 leading-relaxed">
+                      {c.content}
+                    </p>
                   </div>
                 </div>
               ))}
@@ -239,10 +287,16 @@ export default function TaskDetailPanel({ task, projectId, workspaceId, onClose,
                 placeholder="Add a comment..."
                 value={commentText}
                 onChange={(e) => setCommentText(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) handleComment(e) }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) handleComment(e)
+                }}
               />
             </div>
-            <button type="submit" disabled={!commentText.trim() || sending} className="btn-primary self-end">
+            <button
+              type="submit"
+              disabled={!commentText.trim() || sending}
+              className="btn-primary self-end"
+            >
               <RiSendPlaneLine size={15} />
             </button>
           </form>

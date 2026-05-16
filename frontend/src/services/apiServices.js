@@ -20,10 +20,7 @@ export const workspacesAPI = {
   inviteMember: (id, data) => api.post(`/workspaces/${id}/invite`, data),
   removeMember: (wsId, userId) => api.delete(`/workspaces/${wsId}/members/${userId}`),
   getActivity: (id, limit = 50) => api.get(`/workspaces/${id}/activity`, { params: { limit } }),
-  // Validate an invite token (public, no auth needed)
   getInvite: (token) => api.get(`/workspaces/invite/accept?token=${token}`),
- 
-  // Accept the invite (must be authenticated)
   acceptInvite: (token) => api.post(`/workspaces/invite/accept?token=${token}`),
 }
 
@@ -46,7 +43,6 @@ export const tasksAPI = {
   update: (projectId, taskId, data) => api.put(`/projects/${projectId}/tasks/${taskId}`, data),
   move: (projectId, taskId, data) => api.patch(`/projects/${projectId}/tasks/${taskId}/move`, data),
   delete: (projectId, taskId) => api.delete(`/projects/${projectId}/tasks/${taskId}`),
-  // Comments
   getComments: (projectId, taskId) => api.get(`/projects/${projectId}/tasks/${taskId}/comments`),
   addComment: (projectId, taskId, data) =>
     api.post(`/projects/${projectId}/tasks/${taskId}/comments`, data),
@@ -65,8 +61,16 @@ export const documentsAPI = {
 
 // ── Files ─────────────────────────────────────────────────────────────────────
 export const filesAPI = {
-  upload: (formData) =>
-    api.post('/files/upload', formData, { headers: { 'Content-Type': 'multipart/form-data' } }),
+  // Pass task_id, project_id, workspace_id as query params (backend reads them from query, not form)
+  upload: (formData, { taskId, projectId, workspaceId } = {}) => {
+    const params = new URLSearchParams()
+    if (taskId) params.append('task_id', taskId)
+    if (projectId) params.append('project_id', projectId)
+    if (workspaceId) params.append('workspace_id', workspaceId)
+    return api.post(`/files/upload?${params.toString()}`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+  },
   getTaskFiles: (taskId) => api.get(`/files/task/${taskId}`),
   getProjectFiles: (projectId) => api.get(`/files/project/${projectId}`),
   download: (fileId) => `${api.defaults.baseURL}/files/${fileId}/download`,
