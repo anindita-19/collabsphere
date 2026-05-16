@@ -83,6 +83,8 @@ export const notificationsAPI = {
   getUnreadCount: () => api.get('/notifications/unread-count'),
   markRead: (data) => api.put('/notifications/mark-read', data),
   delete: (id) => api.delete(`/notifications/${id}`),
+  getPreferences: () => api.get('/notifications/preferences'),
+  updatePreferences: (data) => api.put('/notifications/preferences', data),
 }
 
 // ── Chat ──────────────────────────────────────────────────────────────────────
