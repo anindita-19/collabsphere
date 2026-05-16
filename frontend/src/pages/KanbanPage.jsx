@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { useParams } from 'react-router-dom'
+import { useParams, useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import toast from 'react-hot-toast'
 import {
@@ -9,7 +9,7 @@ import {
   SortableContext, verticalListSortingStrategy, useSortable,
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import { RiAddLine, RiDeleteBinLine, RiAttachmentLine, RiMessage2Line } from 'react-icons/ri'
+import { RiAddLine, RiDeleteBinLine, RiAttachmentLine, RiMessage2Line, RiArrowLeftLine } from 'react-icons/ri'
 import { tasksAPI } from '@/services/apiServices'
 import { useWebSocket } from '@/hooks/useWebSocket'
 import useAuthStore from '@/store/authStore'
@@ -29,6 +29,7 @@ const COLUMNS = [
 
 export default function KanbanPage() {
   const { workspaceId, projectId } = useParams()
+  const navigate = useNavigate()
   const { user } = useAuthStore()
   const [tasks, setTasks] = useState([])
   const [loading, setLoading] = useState(true)
@@ -77,12 +78,11 @@ export default function KanbanPage() {
     const task = tasks.find((t) => t.id === taskId)
     if (!task) return
 
-    // over.id is either a column id or a task id
     const overIsColumn = COLUMNS.some((c) => c.id === over.id)
     const overTask = !overIsColumn ? tasks.find((t) => t.id === over.id) : null
     const targetStatus = overIsColumn ? over.id : (overTask?.status ?? task.status)
 
-    if (targetStatus === task.status && !overTask) return // dropped in same column, no target task
+    if (targetStatus === task.status && !overTask) return
 
     const columnTasks = tasks
       .filter((t) => t.status === targetStatus && t.id !== taskId)
@@ -92,7 +92,6 @@ export default function KanbanPage() {
       ? columnTasks.findIndex((t) => t.id === over.id)
       : columnTasks.length
 
-    // Optimistic update
     setTasks((prev) =>
       prev.map((t) =>
         t.id === taskId ? { ...t, status: targetStatus, position: targetIndex } : t
@@ -136,6 +135,15 @@ export default function KanbanPage() {
 
   return (
     <div className="h-full flex flex-col gap-4 -m-6 p-6">
+      {/* ── Back link ───────────────────────────────────────────────────────── */}
+      <button
+        onClick={() => navigate(`/workspace/${workspaceId}/project/${projectId}`)}
+        className="flex items-center gap-1.5 text-sm text-surface-500 hover:text-primary-600 dark:hover:text-primary-400 transition-colors w-fit -mb-1"
+      >
+        <RiArrowLeftLine size={15} />
+        Back to Project
+      </button>
+
       {/* Toolbar */}
       <div className="flex items-center gap-3 flex-wrap">
         <input
@@ -232,12 +240,10 @@ export default function KanbanPage() {
 // ── Column ────────────────────────────────────────────────────────────────────
 
 function KanbanColumn({ column, tasks, loading, onAddTask, onTaskClick, onTaskDelete }) {
-  // Register the column itself as a droppable so empty columns accept drops
   const { setNodeRef: setDropRef, isOver } = useDroppable({ id: column.id })
 
   return (
     <div className="flex-shrink-0 w-72 flex flex-col">
-      {/* Column header */}
       <div className="flex items-center justify-between px-3 py-2.5 mb-3">
         <div className="flex items-center gap-2">
           <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: column.color }} />
@@ -256,11 +262,10 @@ function KanbanColumn({ column, tasks, loading, onAddTask, onTaskClick, onTaskDe
         </button>
       </div>
 
-      {/* Task list — attached to both the droppable ref and sortable context */}
       <SortableContext items={tasks.map((t) => t.id)} strategy={verticalListSortingStrategy}>
         <div
           ref={setDropRef}
-          className={`flex-1 rounded-xl p-2 space-y-2 min-h-32 overflow-y-auto max-h-[calc(100vh-280px)] transition-colors duration-150 ${
+          className={`flex-1 rounded-xl p-2 space-y-2 min-h-32 overflow-y-auto max-h-[calc(100vh-320px)] transition-colors duration-150 ${
             isOver
               ? 'bg-primary-50 dark:bg-primary-900/20 ring-2 ring-primary-400/40'
               : 'bg-surface-100/50 dark:bg-surface-800/30'
@@ -325,7 +330,6 @@ function TaskCard({ task, onClick, onDelete, isDragging = false }) {
       }`}
     >
       <div className="flex items-start justify-between gap-2 mb-2">
-        {/* Drag handle + title — listeners only on this area */}
         <p
           {...attributes}
           {...listeners}

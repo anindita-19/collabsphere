@@ -6,6 +6,7 @@ from app.schemas.schemas import TaskCreate, TaskUpdate, TaskMove, CommentCreate
 from app.utils.helpers import serialize_doc, utc_now
 from app.middleware.auth_middleware import get_current_user
 from app.websocket.manager import manager
+from app.routers.notifications import create_notification  # ← email + in-app
 
 router = APIRouter(prefix="/projects/{project_id}/tasks", tags=["Tasks"])
 
@@ -33,6 +34,14 @@ async def log_activity(db, user_id, workspace_id, project_id, action, descriptio
         "created_at": utc_now(),
     })
 
+
+async def get_user_email(db, user_id: str) -> Optional[str]:
+    """Fetch a user's email for notification delivery. Returns None if not found."""
+    user = await db.users.find_one({"_id": ObjectId(user_id)})
+    return user.get("email") if user else None
+
+
+# ── Tasks ─────────────────────────────────────────────────────────────────────
 
 @router.post("", status_code=201)
 async def create_task(
@@ -63,23 +72,23 @@ async def create_task(
     task_doc["_id"] = result.inserted_id
     task = serialize_doc(task_doc)
 
-    # Notify assignees
+    # ── Notify assignees (in-app + email) ─────────────────────────────────────
     for assignee_id in data.assignees:
-        if assignee_id != current_user["id"]:
-            await db.notifications.insert_one({
-                "user_id": assignee_id,
-                "type": "task_assigned",
-                "title": "Task Assigned",
-                "message": f'{current_user["full_name"]} assigned you to "{data.title}"',
-                "resource_id": str(result.inserted_id),
-                "resource_type": "task",
-                "read": False,
-                "created_at": utc_now(),
-            })
-            await manager.send_to_user(assignee_id, {
-                "type": "notification",
-                "message": f'You were assigned to "{data.title}"',
-            })
+        if assignee_id == current_user["id"]:
+            continue
+        email = await get_user_email(db, assignee_id)
+        if email:
+            await create_notification(
+                db,
+                user_id=assignee_id,
+                user_email=email,
+                title="Task Assigned",
+                message=f'{current_user["full_name"]} assigned you to "{data.title}"',
+                type="task_assigned",
+                workspace_id=project["workspace_id"],
+                project_id=project_id,
+                task_id=str(result.inserted_id),
+            )
 
     await log_activity(db, current_user["id"], project["workspace_id"], project_id,
                        "task_created", f'{current_user["full_name"]} created task "{data.title}"')
@@ -121,7 +130,6 @@ async def get_tasks(
     tasks = []
     async for task in cursor:
         t = serialize_doc(task)
-        # Attach assignee details
         assignee_details = []
         for uid in task.get("assignees", []):
             user = await db.users.find_one({"_id": ObjectId(uid)})
@@ -133,9 +141,7 @@ async def get_tasks(
                     "avatar_color": user.get("avatar_color", "#6366f1"),
                 })
         t["assignee_details"] = assignee_details
-        # Comment count
         t["comment_count"] = await db.comments.count_documents({"task_id": str(task["_id"])})
-        # File count
         t["file_count"] = await db.files.count_documents({"task_id": str(task["_id"])})
         tasks.append(t)
     return tasks
@@ -186,23 +192,27 @@ async def update_task(
     update_data = {k: v for k, v in data.model_dump().items() if v is not None}
     update_data["updated_at"] = utc_now()
 
-    # Notify new assignees
+    # ── Notify newly added assignees (in-app + email) ─────────────────────────
     if data.assignees:
         old_assignees = set(task.get("assignees", []))
         new_assignees = set(data.assignees)
         added = new_assignees - old_assignees
         for uid in added:
-            if uid != current_user["id"]:
-                await db.notifications.insert_one({
-                    "user_id": uid,
-                    "type": "task_assigned",
-                    "title": "Task Assigned",
-                    "message": f'{current_user["full_name"]} assigned you to "{task["title"]}"',
-                    "resource_id": task_id,
-                    "resource_type": "task",
-                    "read": False,
-                    "created_at": utc_now(),
-                })
+            if uid == current_user["id"]:
+                continue
+            email = await get_user_email(db, uid)
+            if email:
+                await create_notification(
+                    db,
+                    user_id=uid,
+                    user_email=email,
+                    title="Task Assigned",
+                    message=f'{current_user["full_name"]} assigned you to "{task["title"]}"',
+                    type="task_assigned",
+                    workspace_id=project["workspace_id"],
+                    project_id=project_id,
+                    task_id=task_id,
+                )
 
     await db.tasks.update_one({"_id": ObjectId(task_id)}, {"$set": update_data})
     updated = await db.tasks.find_one({"_id": ObjectId(task_id)})
@@ -247,18 +257,21 @@ async def move_task(
                            "task_moved",
                            f'{current_user["full_name"]} moved "{task["title"]}" to {data.status}')
 
-        if data.status == "completed":
-            # Notify task creator
-            await db.notifications.insert_one({
-                "user_id": task["created_by"],
-                "type": "task_completed",
-                "title": "Task Completed",
-                "message": f'"{task["title"]}" was marked as completed',
-                "resource_id": task_id,
-                "resource_type": "task",
-                "read": False,
-                "created_at": utc_now(),
-            })
+        # ── Notify task creator when completed (in-app + email) ───────────────
+        if data.status == "completed" and task["created_by"] != current_user["id"]:
+            email = await get_user_email(db, task["created_by"])
+            if email:
+                await create_notification(
+                    db,
+                    user_id=task["created_by"],
+                    user_email=email,
+                    title="Task Completed",
+                    message=f'{current_user["full_name"]} marked "{task["title"]}" as completed',
+                    type="task_completed",
+                    workspace_id=project["workspace_id"],
+                    project_id=project_id,
+                    task_id=task_id,
+                )
 
     await manager.broadcast_to_workspace(project["workspace_id"], {
         "type": "task_moved",
@@ -301,7 +314,7 @@ async def delete_task(
     })
 
 
-# ── Comments ─────────────────────────────────────────────────────────────────
+# ── Comments ──────────────────────────────────────────────────────────────────
 
 @router.get("/{task_id}/comments")
 async def get_comments(
@@ -360,19 +373,27 @@ async def add_comment(
         "avatar_color": current_user.get("avatar_color", "#6366f1"),
     }
 
-    # Notify task assignees
-    for assignee_id in task.get("assignees", []):
-        if assignee_id != current_user["id"]:
-            await db.notifications.insert_one({
-                "user_id": assignee_id,
-                "type": "comment_added",
-                "title": "New Comment",
-                "message": f'{current_user["full_name"]} commented on "{task["title"]}"',
-                "resource_id": task_id,
-                "resource_type": "task",
-                "read": False,
-                "created_at": utc_now(),
-            })
+    # ── Notify all assignees (in-app + email) ─────────────────────────────────
+    # Deduplicate: also notify creator if not an assignee, skip commenter
+    recipients = set(task.get("assignees", []))
+    if task["created_by"] != current_user["id"]:
+        recipients.add(task["created_by"])
+    recipients.discard(current_user["id"])
+
+    for recipient_id in recipients:
+        email = await get_user_email(db, recipient_id)
+        if email:
+            await create_notification(
+                db,
+                user_id=recipient_id,
+                user_email=email,
+                title="New Comment",
+                message=f'{current_user["full_name"]} commented on "{task["title"]}": "{data.content[:80]}{"..." if len(data.content) > 80 else ""}"',
+                type="comment_added",
+                workspace_id=project["workspace_id"],
+                project_id=project_id,
+                task_id=task_id,
+            )
 
     await manager.broadcast_to_workspace(project["workspace_id"], {
         "type": "comment_added",

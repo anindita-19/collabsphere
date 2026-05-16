@@ -25,6 +25,32 @@ async def get_gmail_access_token() -> str:
         return response.json()["access_token"]
 
 
+async def _send_via_gmail(to_email: str, subject: str, html_body: str, text_body: str):
+    """Shared low-level Gmail API sender used by all email helpers."""
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = subject
+    msg["From"] = f"CollabSphere <{settings.GMAIL_USER}>"
+    msg["To"] = to_email
+    msg.attach(MIMEText(text_body, "plain"))
+    msg.attach(MIMEText(html_body, "html"))
+
+    raw_message = base64.urlsafe_b64encode(msg.as_bytes()).decode("utf-8")
+    access_token = await get_gmail_access_token()
+
+    async with httpx.AsyncClient() as client:
+        response = await client.post(
+            f"https://gmail.googleapis.com/gmail/v1/users/{settings.GMAIL_USER}/messages/send",
+            headers={
+                "Authorization": f"Bearer {access_token}",
+                "Content-Type": "application/json",
+            },
+            json={"raw": raw_message},
+        )
+
+    if response.status_code not in (200, 201):
+        raise Exception(f"Gmail API error {response.status_code}: {response.text}")
+
+
 async def send_workspace_invite_email(
     to_email: str,
     inviter_name: str,
@@ -117,32 +143,79 @@ async def send_workspace_invite_email(
         f"If you weren't expecting this, you can safely ignore this email."
     )
 
-    # Build the MIME message
-    msg = MIMEMultipart("alternative")
-    msg["Subject"] = f"{inviter_name} invited you to \"{workspace_name}\" on CollabSphere"
-    msg["From"] = f"CollabSphere <{settings.GMAIL_USER}>"
-    msg["To"] = to_email
-    msg.attach(MIMEText(text_body, "plain"))
-    msg.attach(MIMEText(html_body, "html"))
-
-    # Encode message to base64url format (required by Gmail API)
-    raw_message = base64.urlsafe_b64encode(msg.as_bytes()).decode("utf-8")
-
-    # Get fresh access token
-    access_token = await get_gmail_access_token()
-
-    # Send via Gmail API
-    async with httpx.AsyncClient() as client:
-        response = await client.post(
-            f"https://gmail.googleapis.com/gmail/v1/users/{settings.GMAIL_USER}/messages/send",
-            headers={
-                "Authorization": f"Bearer {access_token}",
-                "Content-Type": "application/json",
-            },
-            json={"raw": raw_message},
-        )
-
-    if response.status_code not in (200, 201):
-        raise Exception(f"Gmail API error {response.status_code}: {response.text}")
-
+    await _send_via_gmail(
+        to_email=to_email,
+        subject=f"{inviter_name} invited you to \"{workspace_name}\" on CollabSphere",
+        html_body=html_body,
+        text_body=text_body,
+    )
     logger.info(f"Invite email sent to {to_email} via Gmail API")
+
+
+async def send_notification_email(to_email: str, subject: str, body: str):
+    """
+    Send a generic in-app notification email via Gmail OAuth2.
+    Called by create_notification() in notifications.py for task assignments,
+    comments, completions, etc.
+    """
+    html_body = f"""
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+</head>
+<body style="margin:0;padding:0;background:#0f172a;font-family:system-ui,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#0f172a;padding:40px 16px;">
+    <tr>
+      <td align="center">
+        <table width="100%" style="max-width:520px;background:#1e293b;border-radius:16px;border:1px solid #334155;overflow:hidden;">
+
+          <!-- Header -->
+          <tr>
+            <td style="background:linear-gradient(135deg,#6366f1,#8b5cf6);padding:24px 32px;text-align:center;">
+              <div style="display:inline-block;width:36px;height:36px;background:rgba(255,255,255,0.2);border-radius:10px;line-height:36px;text-align:center;font-weight:700;font-size:14px;color:#fff;">CS</div>
+              <span style="font-size:20px;font-weight:700;color:#fff;vertical-align:middle;margin-left:8px;">CollabSphere</span>
+            </td>
+          </tr>
+
+          <!-- Body -->
+          <tr>
+            <td style="padding:32px;">
+              <h2 style="margin:0 0 16px;font-size:18px;font-weight:700;color:#f1f5f9;">{subject.replace("CollabSphere: ", "")}</h2>
+              <p style="margin:0 0 24px;color:#94a3b8;font-size:15px;line-height:1.6;">{body}</p>
+              <div style="text-align:center;">
+                <a href="{settings.FRONTEND_URL}"
+                   style="display:inline-block;background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;text-decoration:none;font-weight:600;font-size:14px;padding:12px 28px;border-radius:10px;">
+                  Open CollabSphere
+                </a>
+              </div>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="padding:16px 32px;border-top:1px solid #334155;text-align:center;">
+              <p style="margin:0;color:#475569;font-size:12px;">
+                You're receiving this because you're a member of a CollabSphere workspace.
+              </p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+"""
+
+    text_body = f"{body}\n\nOpen CollabSphere: {settings.FRONTEND_URL}"
+
+    await _send_via_gmail(
+        to_email=to_email,
+        subject=subject,
+        html_body=html_body,
+        text_body=text_body,
+    )
+    logger.info(f"Notification email sent to {to_email}: {subject}")

@@ -1,11 +1,11 @@
 import { useState, useEffect } from 'react'
-import { useParams } from 'react-router-dom'
+import { useParams, useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, Legend,
 } from 'recharts'
-import { RiBarChartLine, RiTeamLine, RiCheckboxCircleLine, RiTimeLine } from 'react-icons/ri'
+import { RiBarChartLine, RiTeamLine, RiCheckboxCircleLine, RiTimeLine, RiArrowLeftLine } from 'react-icons/ri'
 import { analyticsAPI, projectsAPI } from '@/services/apiServices'
 import { CardSkeleton } from '@/components/ui/LoadingScreen'
 import Avatar from '@/components/ui/Avatar'
@@ -56,6 +56,7 @@ const CustomTooltip = ({ active, payload, label }) => {
 
 export default function AnalyticsPage() {
   const { workspaceId, projectId } = useParams()
+  const navigate = useNavigate()
   const [analytics, setAnalytics] = useState(null)
   const [projectAnalytics, setProjectAnalytics] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -83,7 +84,6 @@ export default function AnalyticsPage() {
     )
   }
 
-  // ── Pie chart: reads task_counts from backend (now correctly returned) ──────
   const taskStatusData = [
     { name: 'To Do',       value: analytics?.task_counts?.todo        ?? 0, color: '#94a3b8' },
     { name: 'In Progress', value: analytics?.task_counts?.in_progress ?? 0, color: '#3b82f6' },
@@ -92,7 +92,6 @@ export default function AnalyticsPage() {
   ]
   const pieHasData = taskStatusData.some((d) => d.value > 0)
 
-  // ── Priority bar: works from projectAnalytics.priority_counts ────────────
   const priorityData = projectAnalytics?.priority_counts
     ? Object.entries(projectAnalytics.priority_counts).map(([k, v]) => ({
         name: k.charAt(0).toUpperCase() + k.slice(1),
@@ -110,6 +109,15 @@ export default function AnalyticsPage() {
 
   return (
     <div className="max-w-6xl mx-auto space-y-6 animate-fade-in">
+
+      {/* ── Back link ───────────────────────────────────────────────────────── */}
+      <button
+        onClick={() => navigate(`/workspace/${workspaceId}/project/${projectId}`)}
+        className="flex items-center gap-1.5 text-sm text-surface-500 hover:text-primary-600 dark:hover:text-primary-400 transition-colors"
+      >
+        <RiArrowLeftLine size={15} />
+        Back to Project
+      </button>
 
       {/* ── Stat Cards ──────────────────────────────────────────────────────── */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -148,8 +156,6 @@ export default function AnalyticsPage() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-
-        {/* ── Task Status Pie ────────────────────────────────────────────────── */}
         <motion.div
           initial={{ opacity: 0, y: 16 }}
           animate={{ opacity: 1, y: 0 }}
@@ -193,7 +199,6 @@ export default function AnalyticsPage() {
           )}
         </motion.div>
 
-        {/* ── Priority Bar Chart ────────────────────────────────────────────── */}
         <motion.div
           initial={{ opacity: 0, y: 16 }}
           animate={{ opacity: 1, y: 0 }}
@@ -219,7 +224,6 @@ export default function AnalyticsPage() {
         </motion.div>
       </div>
 
-      {/* ── Project Progress Overview ────────────────────────────────────────── */}
       {projectStatsData.length > 0 && (
         <motion.div
           initial={{ opacity: 0, y: 16 }}
@@ -243,7 +247,6 @@ export default function AnalyticsPage() {
         </motion.div>
       )}
 
-      {/* ── Contributor Workload ─────────────────────────────────────────────── */}
       {memberStats.length > 0 && (
         <motion.div
           initial={{ opacity: 0, y: 16 }}
@@ -287,7 +290,6 @@ export default function AnalyticsPage() {
         </motion.div>
       )}
 
-      {/* ── Recent Activity ──────────────────────────────────────────────────── */}
       {projectAnalytics?.recent_activity?.length > 0 && (
         <motion.div
           initial={{ opacity: 0, y: 16 }}

@@ -1,11 +1,11 @@
 import { useState, useEffect } from 'react'
-import { useParams } from 'react-router-dom'
+import { useParams, useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import toast from 'react-hot-toast'
 import ReactMarkdown from 'react-markdown'
 import {
   RiAddLine, RiFileTextLine, RiEditLine, RiDeleteBinLine,
-  RiEyeLine, RiSaveLine, RiTimeLine,
+  RiEyeLine, RiSaveLine, RiTimeLine, RiArrowLeftLine,
 } from 'react-icons/ri'
 import { documentsAPI } from '@/services/apiServices'
 import useAuthStore from '@/store/authStore'
@@ -36,7 +36,8 @@ npm run dev
 `
 
 export default function DocumentsPage() {
-  const { projectId } = useParams()
+  const { workspaceId, projectId } = useParams()
+  const navigate = useNavigate()
   const { user } = useAuthStore()
   const [documents, setDocuments] = useState([])
   const [selectedDoc, setSelectedDoc] = useState(null)
@@ -117,155 +118,164 @@ export default function DocumentsPage() {
   }
 
   return (
-    <div className="max-w-7xl mx-auto flex gap-5 h-[calc(100vh-130px)] animate-fade-in">
-      {/* Sidebar */}
-      <div className="w-60 flex-shrink-0 flex flex-col gap-3">
-        <button
-          onClick={handleCreate}
-          disabled={creating}
-          className="btn-primary w-full justify-center"
-        >
-          <RiAddLine size={16} />
-          New Document
-        </button>
+    <div className="max-w-7xl mx-auto flex flex-col gap-3 h-[calc(100vh-130px)] animate-fade-in">
 
-        <div className="flex-1 overflow-y-auto space-y-1">
-          {loading ? (
-            <div className="space-y-2">
-              {[1,2,3].map(i => (
-                <div key={i} className="h-12 rounded-lg bg-surface-200 dark:bg-surface-700 animate-pulse" />
-              ))}
-            </div>
-          ) : documents.length === 0 ? (
-            <p className="text-xs text-surface-400 text-center py-4">No documents yet</p>
-          ) : (
-            documents.map((doc) => (
-              <button
-                key={doc.id}
-                onClick={() => selectDoc(doc)}
-                className={`w-full text-left px-3 py-2.5 rounded-xl transition-all group relative ${
-                  selectedDoc?.id === doc.id
-                    ? 'bg-primary-50 dark:bg-primary-950 border border-primary-200/50 dark:border-primary-800/50'
-                    : 'hover:bg-surface-100 dark:hover:bg-surface-800'
-                }`}
-              >
-                <div className="flex items-start gap-2">
-                  <RiFileTextLine
-                    size={14}
-                    className={`mt-0.5 flex-shrink-0 ${selectedDoc?.id === doc.id ? 'text-primary-600 dark:text-primary-400' : 'text-surface-400'}`}
-                  />
-                  <div className="flex-1 min-w-0">
-                    <p className={`text-xs font-medium truncate ${selectedDoc?.id === doc.id ? 'text-primary-700 dark:text-primary-300' : 'text-surface-700 dark:text-surface-300'}`}>
-                      {doc.title}
-                    </p>
-                    <p className="text-[10px] text-surface-400 mt-0.5">{formatRelative(doc.updated_at)}</p>
+      {/* ── Back link ───────────────────────────────────────────────────────── */}
+      <button
+        onClick={() => navigate(`/workspace/${workspaceId}/project/${projectId}`)}
+        className="flex items-center gap-1.5 text-sm text-surface-500 hover:text-primary-600 dark:hover:text-primary-400 transition-colors w-fit"
+      >
+        <RiArrowLeftLine size={15} />
+        Back to Project
+      </button>
+
+      {/* ── Main layout ─────────────────────────────────────────────────────── */}
+      <div className="flex gap-5 flex-1 overflow-hidden">
+        {/* Sidebar */}
+        <div className="w-60 flex-shrink-0 flex flex-col gap-3">
+          <button
+            onClick={handleCreate}
+            disabled={creating}
+            className="btn-primary w-full justify-center"
+          >
+            <RiAddLine size={16} />
+            New Document
+          </button>
+
+          <div className="flex-1 overflow-y-auto space-y-1">
+            {loading ? (
+              <div className="space-y-2">
+                {[1,2,3].map(i => (
+                  <div key={i} className="h-12 rounded-lg bg-surface-200 dark:bg-surface-700 animate-pulse" />
+                ))}
+              </div>
+            ) : documents.length === 0 ? (
+              <p className="text-xs text-surface-400 text-center py-4">No documents yet</p>
+            ) : (
+              documents.map((doc) => (
+                <button
+                  key={doc.id}
+                  onClick={() => selectDoc(doc)}
+                  className={`w-full text-left px-3 py-2.5 rounded-xl transition-all group relative ${
+                    selectedDoc?.id === doc.id
+                      ? 'bg-primary-50 dark:bg-primary-950 border border-primary-200/50 dark:border-primary-800/50'
+                      : 'hover:bg-surface-100 dark:hover:bg-surface-800'
+                  }`}
+                >
+                  <div className="flex items-start gap-2">
+                    <RiFileTextLine
+                      size={14}
+                      className={`mt-0.5 flex-shrink-0 ${selectedDoc?.id === doc.id ? 'text-primary-600 dark:text-primary-400' : 'text-surface-400'}`}
+                    />
+                    <div className="flex-1 min-w-0">
+                      <p className={`text-xs font-medium truncate ${selectedDoc?.id === doc.id ? 'text-primary-700 dark:text-primary-300' : 'text-surface-700 dark:text-surface-300'}`}>
+                        {doc.title}
+                      </p>
+                      <p className="text-[10px] text-surface-400 mt-0.5">{formatRelative(doc.updated_at)}</p>
+                    </div>
                   </div>
-                </div>
-                {doc.created_by === user?.id && (
-                  <button
-                    onClick={(e) => { e.stopPropagation(); handleDelete(doc) }}
-                    className="absolute right-2 top-2 p-0.5 rounded text-surface-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all"
-                  >
-                    <RiDeleteBinLine size={12} />
-                  </button>
-                )}
-              </button>
-            ))
-          )}
+                  {doc.created_by === user?.id && (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); handleDelete(doc) }}
+                      className="absolute right-2 top-2 p-0.5 rounded text-surface-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all"
+                    >
+                      <RiDeleteBinLine size={12} />
+                    </button>
+                  )}
+                </button>
+              ))
+            )}
+          </div>
         </div>
-      </div>
 
-      {/* Editor/Viewer */}
-      <div className="flex-1 card flex flex-col overflow-hidden">
-        {!selectedDoc ? (
-          <EmptyState
-            icon="📄"
-            title="No document selected"
-            description="Create a new document or select one from the list"
-            action={
-              <button onClick={handleCreate} className="btn-primary">
-                <RiAddLine size={16} /> Create Document
-              </button>
-            }
-          />
-        ) : (
-          <>
-            {/* Doc header */}
-            <div className="flex items-center justify-between px-6 py-4 border-b border-surface-200 dark:border-surface-700">
-              {isEditing ? (
-                <input
-                  className="flex-1 font-display font-semibold text-xl text-surface-900 dark:text-surface-100 bg-transparent outline-none border-b-2 border-primary-400 mr-4 pb-0.5"
-                  value={editTitle}
-                  onChange={(e) => setEditTitle(e.target.value)}
-                  placeholder="Document title..."
-                />
-              ) : (
-                <h2 className="font-display font-semibold text-xl text-surface-900 dark:text-surface-100">
-                  {selectedDoc.title}
-                </h2>
-              )}
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-surface-400 flex items-center gap-1">
-                  <RiTimeLine size={12} />
-                  {selectedDoc.last_editor_name
-                    ? `Edited by ${selectedDoc.last_editor_name} ${formatRelative(selectedDoc.updated_at)}`
-                    : `By ${selectedDoc.author_name}`}
-                </span>
+        {/* Editor/Viewer */}
+        <div className="flex-1 card flex flex-col overflow-hidden">
+          {!selectedDoc ? (
+            <EmptyState
+              icon="📄"
+              title="No document selected"
+              description="Create a new document or select one from the list"
+              action={
+                <button onClick={handleCreate} className="btn-primary">
+                  <RiAddLine size={16} /> Create Document
+                </button>
+              }
+            />
+          ) : (
+            <>
+              <div className="flex items-center justify-between px-6 py-4 border-b border-surface-200 dark:border-surface-700">
                 {isEditing ? (
-                  <>
-                    <button onClick={() => setIsEditing(false)} className="btn-secondary">
-                      <RiEyeLine size={15} />
-                      Preview
-                    </button>
-                    <button onClick={handleSave} disabled={saving} className="btn-primary">
-                      <RiSaveLine size={15} />
-                      {saving ? 'Saving...' : 'Save'}
-                    </button>
-                  </>
+                  <input
+                    className="flex-1 font-display font-semibold text-xl text-surface-900 dark:text-surface-100 bg-transparent outline-none border-b-2 border-primary-400 mr-4 pb-0.5"
+                    value={editTitle}
+                    onChange={(e) => setEditTitle(e.target.value)}
+                    placeholder="Document title..."
+                  />
                 ) : (
-                  <button onClick={() => setIsEditing(true)} className="btn-secondary">
-                    <RiEditLine size={15} />
-                    Edit
-                  </button>
+                  <h2 className="font-display font-semibold text-xl text-surface-900 dark:text-surface-100">
+                    {selectedDoc.title}
+                  </h2>
+                )}
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-surface-400 flex items-center gap-1">
+                    <RiTimeLine size={12} />
+                    {selectedDoc.last_editor_name
+                      ? `Edited by ${selectedDoc.last_editor_name} ${formatRelative(selectedDoc.updated_at)}`
+                      : `By ${selectedDoc.author_name}`}
+                  </span>
+                  {isEditing ? (
+                    <>
+                      <button onClick={() => setIsEditing(false)} className="btn-secondary">
+                        <RiEyeLine size={15} />
+                        Preview
+                      </button>
+                      <button onClick={handleSave} disabled={saving} className="btn-primary">
+                        <RiSaveLine size={15} />
+                        {saving ? 'Saving...' : 'Save'}
+                      </button>
+                    </>
+                  ) : (
+                    <button onClick={() => setIsEditing(true)} className="btn-secondary">
+                      <RiEditLine size={15} />
+                      Edit
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              <div className="flex-1 overflow-hidden">
+                {isEditing ? (
+                  <div className="h-full flex gap-0">
+                    <div className="flex-1 flex flex-col border-r border-surface-200 dark:border-surface-700">
+                      <div className="px-4 py-2 bg-surface-50 dark:bg-surface-900 border-b border-surface-200 dark:border-surface-700">
+                        <span className="text-xs font-medium text-surface-400">Markdown</span>
+                      </div>
+                      <textarea
+                        className="flex-1 p-6 bg-transparent text-sm text-surface-900 dark:text-surface-100 font-mono resize-none outline-none leading-relaxed"
+                        value={editContent}
+                        onChange={(e) => setEditContent(e.target.value)}
+                        placeholder="Write markdown here..."
+                        spellCheck={false}
+                      />
+                    </div>
+                    <div className="flex-1 flex flex-col overflow-hidden">
+                      <div className="px-4 py-2 bg-surface-50 dark:bg-surface-900 border-b border-surface-200 dark:border-surface-700">
+                        <span className="text-xs font-medium text-surface-400">Preview</span>
+                      </div>
+                      <div className="flex-1 overflow-y-auto p-6">
+                        <MarkdownRenderer content={editContent} />
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="h-full overflow-y-auto p-8">
+                    <MarkdownRenderer content={selectedDoc.content} />
+                  </div>
                 )}
               </div>
-            </div>
-
-            {/* Content area */}
-            <div className="flex-1 overflow-hidden">
-              {isEditing ? (
-                <div className="h-full flex gap-0">
-                  {/* Editor */}
-                  <div className="flex-1 flex flex-col border-r border-surface-200 dark:border-surface-700">
-                    <div className="px-4 py-2 bg-surface-50 dark:bg-surface-900 border-b border-surface-200 dark:border-surface-700">
-                      <span className="text-xs font-medium text-surface-400">Markdown</span>
-                    </div>
-                    <textarea
-                      className="flex-1 p-6 bg-transparent text-sm text-surface-900 dark:text-surface-100 font-mono resize-none outline-none leading-relaxed"
-                      value={editContent}
-                      onChange={(e) => setEditContent(e.target.value)}
-                      placeholder="Write markdown here..."
-                      spellCheck={false}
-                    />
-                  </div>
-                  {/* Preview */}
-                  <div className="flex-1 flex flex-col overflow-hidden">
-                    <div className="px-4 py-2 bg-surface-50 dark:bg-surface-900 border-b border-surface-200 dark:border-surface-700">
-                      <span className="text-xs font-medium text-surface-400">Preview</span>
-                    </div>
-                    <div className="flex-1 overflow-y-auto p-6">
-                      <MarkdownRenderer content={editContent} />
-                    </div>
-                  </div>
-                </div>
-              ) : (
-                <div className="h-full overflow-y-auto p-8">
-                  <MarkdownRenderer content={selectedDoc.content} />
-                </div>
-              )}
-            </div>
-          </>
-        )}
+            </>
+          )}
+        </div>
       </div>
     </div>
   )

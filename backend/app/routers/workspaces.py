@@ -11,6 +11,7 @@ from app.utils.helpers import serialize_doc, utc_now
 from app.middleware.auth_middleware import get_current_user
 from app.websocket.manager import manager
 from app.utils.email import send_workspace_invite_email
+from app.routers.notifications import create_notification  # ← email + in-app
 from app.config import settings
 
 logger = logging.getLogger(__name__)
@@ -32,8 +33,6 @@ async def log_activity(db, user_id: str, workspace_id: str, action: str, descrip
 
 
 # ── INVITE ROUTES MUST COME FIRST (before /{workspace_id}) ─────────────────
-# FastAPI matches routes top-to-bottom. If /{workspace_id} is defined first,
-# it will swallow /invite/accept treating "invite" as a workspace_id.
 
 @router.get("/invite/accept")
 async def accept_invite(
@@ -99,7 +98,6 @@ async def confirm_accept_invite(
     if not ws:
         raise HTTPException(status_code=404, detail="Workspace no longer exists")
 
-    # Check if already a member (e.g. added another way in the meantime)
     already_member = any(m["user_id"] == current_user["id"] for m in ws.get("members", []))
     if already_member:
         await db.pending_invites.update_one({"token": token}, {"$set": {"used": True}})
@@ -125,16 +123,18 @@ async def confirm_accept_invite(
         {"$set": {"used": True, "accepted_at": utc_now(), "accepted_by": current_user["id"]}}
     )
 
-    await db.notifications.insert_one({
-        "user_id": invite["invited_by_id"],
-        "type": "invite_accepted",
-        "title": "Invite Accepted",
-        "message": f'{current_user["full_name"]} accepted your invitation to "{ws["name"]}"',
-        "resource_id": workspace_id,
-        "resource_type": "workspace",
-        "read": False,
-        "created_at": utc_now(),
-    })
+    # ── Notify inviter (in-app + email) ───────────────────────────────────────
+    inviter = await db.users.find_one({"_id": ObjectId(invite["invited_by_id"])})
+    if inviter:
+        await create_notification(
+            db,
+            user_id=invite["invited_by_id"],
+            user_email=inviter["email"],
+            title="Invite Accepted",
+            message=f'{current_user["full_name"]} accepted your invitation to "{ws["name"]}"',
+            type="invite_accepted",
+            workspace_id=workspace_id,
+        )
 
     await log_activity(
         db, current_user["id"], workspace_id, "member_joined",

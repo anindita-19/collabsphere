@@ -1,50 +1,50 @@
 import logging
-import httpx
-import os
-from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
+from fastapi import APIRouter, HTTPException, Depends
 from bson import ObjectId
 from app.database import get_db
 from app.schemas.schemas import ChatMessage, NotificationMarkRead
 from app.utils.helpers import serialize_doc, utc_now
 from app.middleware.auth_middleware import get_current_user
 from app.websocket.manager import manager
+from app.utils.email import send_notification_email  # ← your Gmail sender
 
 logger = logging.getLogger(__name__)
 
-RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
-FROM_EMAIL = os.getenv("FROM_EMAIL", "notifications@yourdomain.com")  # Must be a verified Resend domain
 
-# ── Email helper ──────────────────────────────────────────────────────────────
+# ── Notification email helper ─────────────────────────────────────────────────
 
-async def send_notification_email(to_email: str, subject: str, body: str):
-    """Send an email via Resend. Silently logs on failure — never crashes the request."""
-    if not RESEND_API_KEY:
-        return
-    try:
-        async with httpx.AsyncClient() as client:
-            res = await client.post(
-                "https://api.resend.com/emails",
-                headers={"Authorization": f"Bearer {RESEND_API_KEY}"},
-                json={
-                    "from": FROM_EMAIL,
-                    "to": [to_email],
-                    "subject": subject,
-                    "html": f"<p>{body}</p><br><small>CollabSphere Notification</small>",
-                },
-                timeout=10,
-            )
-            if res.status_code not in (200, 201):
-                logger.warning(f"Resend returned {res.status_code}: {res.text}")
-    except Exception as e:
-        logger.warning(f"Email send failed (non-fatal): {e}")
-
-
-async def create_notification(db, *, user_id: str, user_email: str, title: str,
-                               message: str, type: str, workspace_id: str = None,
-                               project_id: str = None, task_id: str = None):
+async def _send_notif_email_safe(to_email: str, subject: str, body: str):
     """
-    Create an in-app notification and send an email.
-    Import and call this from tasks.py / workspaces.py wherever you create notifications.
+    Thin wrapper around the Gmail sender that never crashes the request.
+    All notification emails go through Gmail OAuth2 (same as invite emails).
+    """
+    try:
+        await send_notification_email(to_email=to_email, subject=subject, body=body)
+    except Exception as e:
+        logger.warning(f"Notification email failed (non-fatal): {e}")
+
+
+# ── Core helper called from tasks.py / workspaces.py ─────────────────────────
+
+async def create_notification(
+    db,
+    *,
+    user_id: str,
+    user_email: str,
+    title: str,
+    message: str,
+    type: str,
+    workspace_id: str = None,
+    project_id: str = None,
+    task_id: str = None,
+):
+    """
+    1. Saves an in-app notification to MongoDB.
+    2. Pushes it live via WebSocket.
+    3. Sends an email via Gmail OAuth2.
+
+    Import and call this from tasks.py / workspaces.py wherever
+    you assign tasks, complete tasks, leave comments, etc.
     """
     notif_doc = {
         "user_id": user_id,
@@ -67,8 +67,8 @@ async def create_notification(db, *, user_id: str, user_email: str, title: str,
             "notification": serialize_doc(notif_doc),
         })
 
-    # Send email (non-blocking, non-fatal)
-    await send_notification_email(
+    # Send email via Gmail (non-fatal)
+    await _send_notif_email_safe(
         to_email=user_email,
         subject=f"CollabSphere: {title}",
         body=message,
@@ -77,7 +77,7 @@ async def create_notification(db, *, user_id: str, user_email: str, title: str,
     return serialize_doc(notif_doc)
 
 
-# ── Notifications ─────────────────────────────────────────────────────────────
+# ── Notifications router ──────────────────────────────────────────────────────
 
 notif_router = APIRouter(prefix="/notifications", tags=["Notifications"])
 
@@ -144,7 +144,7 @@ async def delete_notification(
     })
 
 
-# ── Chat ─────────────────────────────────────────────────────────────────────
+# ── Chat router ───────────────────────────────────────────────────────────────
 
 chat_router = APIRouter(prefix="/workspaces/{workspace_id}/chat", tags=["Chat"])
 
@@ -208,7 +208,7 @@ async def send_chat_message(
     return msg
 
 
-# ── Analytics (global) ────────────────────────────────────────────────────────
+# ── Analytics router ──────────────────────────────────────────────────────────
 
 analytics_router = APIRouter(prefix="/analytics", tags=["Analytics"])
 
@@ -231,7 +231,6 @@ async def get_workspace_analytics(
     async for p in db.projects.find({"workspace_id": workspace_id}):
         project_ids.append(str(p["_id"]))
 
-    # ── Task counts by status ─────────────────────────────────────────────────
     total_tasks = await db.tasks.count_documents({"project_id": {"$in": project_ids}})
     todo_tasks = await db.tasks.count_documents({
         "project_id": {"$in": project_ids}, "status": "todo"
@@ -251,7 +250,6 @@ async def get_workspace_analytics(
         "workspace_id": workspace_id, "status": "active"
     })
 
-    # ── Member stats ──────────────────────────────────────────────────────────
     member_stats = []
     for m in ws.get("members", []):
         task_count = await db.tasks.count_documents({
@@ -271,7 +269,6 @@ async def get_workspace_analytics(
             "completed": completed,
         })
 
-    # ── Priority breakdown ────────────────────────────────────────────────────
     priority_data = []
     for priority in ["low", "medium", "high", "urgent"]:
         count = await db.tasks.count_documents({
@@ -279,7 +276,6 @@ async def get_workspace_analytics(
         })
         priority_data.append({"priority": priority, "count": count})
 
-    # ── Project progress ──────────────────────────────────────────────────────
     project_stats = []
     async for p in db.projects.find({"workspace_id": workspace_id}):
         pid = str(p["_id"])
@@ -294,7 +290,6 @@ async def get_workspace_analytics(
 
     completion_rate = round(completed_tasks / max(total_tasks, 1) * 100, 1)
 
-    # online_users: only count users actually in this workspace
     online_user_ids = manager.get_online_users(workspace_id)
     online_count = len([uid for uid in online_user_ids if uid in member_ids])
 
@@ -302,7 +297,6 @@ async def get_workspace_analytics(
         "total_tasks": total_tasks,
         "completed_tasks": completed_tasks,
         "in_progress": in_progress_tasks,
-        # ← This is what the frontend pie chart needs
         "task_counts": {
             "todo": todo_tasks,
             "in_progress": in_progress_tasks,
