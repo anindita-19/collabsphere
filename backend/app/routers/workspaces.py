@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, Depends, status
 from bson import ObjectId
 from typing import List
-from datetime import timedelta
+from datetime import timedelta, timezone
 import secrets
 import logging
 
@@ -50,7 +50,10 @@ async def accept_invite(
     if not invite:
         raise HTTPException(status_code=404, detail="Invite not found or already used")
 
-    if invite["expires_at"] < utc_now():
+    expires_at = invite["expires_at"]
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    if expires_at < utc_now():
         raise HTTPException(status_code=410, detail="This invite link has expired")
 
     return {
@@ -79,7 +82,10 @@ async def confirm_accept_invite(
     if not invite:
         raise HTTPException(status_code=404, detail="Invite not found or already used")
 
-    if invite["expires_at"] < utc_now():
+    expires_at = invite["expires_at"]
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    if expires_at < utc_now():
         raise HTTPException(status_code=410, detail="This invite link has expired")
 
     if current_user["email"].lower() != invite["email"].lower():
