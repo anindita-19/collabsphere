@@ -1,4 +1,3 @@
-
 import AcceptInvite from '@/pages/AcceptInvite'
 
 import { useEffect, lazy, Suspense } from 'react'
@@ -50,20 +49,25 @@ export default function App() {
         <Route path="/" element={<PublicRoute><Landing /></PublicRoute>} />
         <Route path="/login" element={<PublicRoute><Login /></PublicRoute>} />
         <Route path="/register" element={<PublicRoute><Register /></PublicRoute>} />
+        <Route path="/invite/accept" element={<AcceptInvite />} />
 
         {/* Protected */}
         <Route element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/workspace/:workspaceId" element={<WorkspacePage />} />
-          <Route path="/workspace/:workspaceId/project/:projectId" element={<ProjectPage />} />
-          <Route path="/workspace/:workspaceId/project/:projectId/kanban" element={<KanbanPage />} />
-          <Route path="/workspace/:workspaceId/project/:projectId/analytics" element={<AnalyticsPage />} />
-          <Route path="/workspace/:workspaceId/project/:projectId/docs" element={<DocumentsPage />} />
+
+          {/* ProjectPage as layout wrapper — renders header + tabs always */}
+          <Route path="/workspace/:workspaceId/project/:projectId" element={<ProjectPage />}>
+            <Route path="kanban" element={<KanbanPage />} />
+            <Route path="analytics" element={<AnalyticsPage />} />
+            <Route path="docs" element={<DocumentsPage />} />
+          </Route>
+
           <Route path="/notifications" element={<NotificationsPage />} />
           <Route path="/profile" element={<ProfilePage />} />
           <Route path="/settings" element={<SettingsPage />} />
         </Route>
-        <Route path="/invite/accept" element={<AcceptInvite />} />
+
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </Suspense>

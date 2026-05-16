@@ -1,417 +1,200 @@
-from fastapi import APIRouter, HTTPException, Depends, status
-from bson import ObjectId
-from typing import List
-from datetime import timedelta, timezone
-import secrets
-import logging
+import { useState, useEffect, useRef } from 'react'
+import { motion } from 'framer-motion'
+import { RiCloseLine, RiSendPlaneLine, RiAttachmentLine, RiDownloadLine, RiFileTextLine, RiImageLine } from 'react-icons/ri'
+import { chatAPI } from '@/services/apiServices'
+import { useWebSocket } from '@/hooks/useWebSocket'
+import useAuthStore from '@/store/authStore'
+import Avatar from '@/components/ui/Avatar'
+import { formatRelative } from '@/utils/helpers'
+import toast from 'react-hot-toast'
 
-from app.database import get_db
-from app.schemas.schemas import WorkspaceCreate, WorkspaceUpdate, InviteMember, MemberRole
-from app.utils.helpers import serialize_doc, utc_now
-from app.middleware.auth_middleware import get_current_user
-from app.websocket.manager import manager
-from app.utils.email import send_workspace_invite_email
-from app.routers.notifications import create_notification  # ← email + in-app
-from app.config import settings
+const API_BASE = import.meta.env.VITE_API_BASE_URL?.replace('/api/v1', '') || ''
 
-logger = logging.getLogger(__name__)
+function FileAttachment({ file }) {
+  const isImage = file.content_type?.startsWith('image/')
+  const fileUrl = `${API_BASE}/uploads/${file.filename}`
 
-router = APIRouter(prefix="/workspaces", tags=["Workspaces"])
+  return (
+    <a
+      href={fileUrl}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="flex items-center gap-2 mt-1 px-2 py-1.5 rounded-lg bg-black/10 dark:bg-white/10 hover:bg-black/20 dark:hover:bg-white/20 transition-colors text-[10px] max-w-[180px]"
+      title={file.original_name}
+    >
+      {isImage ? <RiImageLine size={12} /> : <RiFileTextLine size={12} />}
+      <span className="truncate flex-1">{file.original_name}</span>
+      <RiDownloadLine size={10} className="flex-shrink-0 opacity-70" />
+    </a>
+  )
+}
 
-INVITE_EXPIRE_DAYS = 7
+export default function WorkspaceChat({ workspaceId, onClose }) {
+  const { user } = useAuthStore()
+  const [messages, setMessages] = useState([])
+  const [input, setInput] = useState('')
+  const [loading, setLoading] = useState(true)
+  const [sending, setSending] = useState(false)
+  const bottomRef = useRef(null)
+  const fileInputRef = useRef(null)
 
+  // ── Initial load via REST ─────────────────────────────────────────────────
+  useEffect(() => {
+    chatAPI.getMessages(workspaceId)
+      .then((res) => setMessages(res.data))
+      .catch(() => toast.error('Failed to load messages'))
+      .finally(() => setLoading(false))
+  }, [workspaceId])
 
-async def log_activity(db, user_id: str, workspace_id: str, action: str, description: str, project_id: str = None):
-    await db.activity_logs.insert_one({
-        "user_id": user_id,
-        "workspace_id": workspace_id,
-        "project_id": project_id,
-        "action": action,
-        "description": description,
-        "created_at": utc_now(),
-    })
-
-
-# ── INVITE ROUTES MUST COME FIRST (before /{workspace_id}) ─────────────────
-
-@router.get("/invite/accept")
-async def accept_invite(
-    token: str,
-    db=Depends(get_db),
-):
-    """
-    Public endpoint — no auth required.
-    Validates the token and returns invite details so the frontend
-    can show the accept screen (register or login then join).
-    """
-    invite = await db.pending_invites.find_one({"token": token, "used": False})
-
-    if not invite:
-        raise HTTPException(status_code=404, detail="Invite not found or already used")
-
-    expires_at = invite["expires_at"]
-    if expires_at.tzinfo is None:
-        expires_at = expires_at.replace(tzinfo=timezone.utc)
-    if expires_at < utc_now():
-        raise HTTPException(status_code=410, detail="This invite link has expired")
-
-    return {
-        "token": token,
-        "workspace_name": invite["workspace_name"],
-        "workspace_id": invite["workspace_id"],
-        "email": invite["email"],
-        "role": invite["role"],
-        "invited_by": invite["invited_by_name"],
+  // ── Real-time: append incoming chat_message events ────────────────────────
+  useWebSocket(workspaceId, (msg) => {
+    if (msg.type === 'chat_message' && msg.message) {
+      setMessages((prev) => {
+        if (prev.some((m) => m.id === msg.message.id)) return prev
+        return [...prev, msg.message]
+      })
     }
+  })
 
+  // ── Auto-scroll on new messages ───────────────────────────────────────────
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [messages])
 
-@router.post("/invite/accept")
-async def confirm_accept_invite(
-    token: str,
-    current_user=Depends(get_current_user),
-    db=Depends(get_db),
-):
-    """
-    Authenticated endpoint.
-    After the user logs in / registers, call this to actually join the workspace.
-    The logged-in user's email must match the invite email.
-    """
-    invite = await db.pending_invites.find_one({"token": token, "used": False})
-
-    if not invite:
-        raise HTTPException(status_code=404, detail="Invite not found or already used")
-
-    expires_at = invite["expires_at"]
-    if expires_at.tzinfo is None:
-        expires_at = expires_at.replace(tzinfo=timezone.utc)
-    if expires_at < utc_now():
-        raise HTTPException(status_code=410, detail="This invite link has expired")
-
-    if current_user["email"].lower() != invite["email"].lower():
-        raise HTTPException(
-            status_code=403,
-            detail=f"This invite was sent to {invite['email']}. Please log in with that account."
-        )
-
-    workspace_id = invite["workspace_id"]
-    ws = await db.workspaces.find_one({"_id": ObjectId(workspace_id)})
-    if not ws:
-        raise HTTPException(status_code=404, detail="Workspace no longer exists")
-
-    already_member = any(m["user_id"] == current_user["id"] for m in ws.get("members", []))
-    if already_member:
-        await db.pending_invites.update_one({"token": token}, {"$set": {"used": True}})
-        return {"message": "You are already a member of this workspace", "workspace_id": workspace_id}
-
-    new_member = {
-        "user_id": current_user["id"],
-        "email": current_user["email"],
-        "full_name": current_user["full_name"],
-        "username": current_user["username"],
-        "role": invite["role"],
-        "avatar_color": current_user.get("avatar_color", "#6366f1"),
-        "joined_at": utc_now(),
+  const handleSend = async (e) => {
+    e.preventDefault()
+    if (!input.trim() || sending) return
+    setSending(true)
+    try {
+      const res = await chatAPI.sendMessage(workspaceId, { content: input.trim() })
+      setMessages((prev) => {
+        if (prev.some((m) => m.id === res.data.id)) return prev
+        return [...prev, res.data]
+      })
+      setInput('')
+    } catch {
+      toast.error('Failed to send message')
+    } finally {
+      setSending(false)
     }
+  }
 
-    await db.workspaces.update_one(
-        {"_id": ObjectId(workspace_id)},
-        {"$push": {"members": new_member}},
-    )
+  const handleFileUpload = async (e) => {
+    const file = e.target.files?.[0]
+    if (!file) return
 
-    await db.pending_invites.update_one(
-        {"token": token},
-        {"$set": {"used": True, "accepted_at": utc_now(), "accepted_by": current_user["id"]}}
-    )
-
-    # ── Notify inviter (in-app + email) ───────────────────────────────────────
-    inviter = await db.users.find_one({"_id": ObjectId(invite["invited_by_id"])})
-    if inviter:
-        await create_notification(
-            db,
-            user_id=invite["invited_by_id"],
-            user_email=inviter["email"],
-            title="Invite Accepted",
-            message=f'{current_user["full_name"]} accepted your invitation to "{ws["name"]}"',
-            type="invite_accepted",
-            workspace_id=workspace_id,
-        )
-
-    await log_activity(
-        db, current_user["id"], workspace_id, "member_joined",
-        f'{current_user["full_name"]} joined the workspace via invite'
-    )
-
-    await manager.broadcast_to_workspace(workspace_id, {
-        "type": "member_joined",
-        "workspace_id": workspace_id,
-        "user": {
-            "id": current_user["id"],
-            "full_name": current_user["full_name"],
-            "email": current_user["email"],
-        }
+    // Warn user about ephemeral storage
+    toast('Files are stored temporarily and may be lost on server restart', {
+      icon: '⚠️',
+      duration: 4000,
     })
 
-    return {"message": "Successfully joined the workspace", "workspace_id": workspace_id}
+    setSending(true)
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+      formData.append('content', `📎 Shared a file: ${file.name}`)
 
-
-# ── Workspace CRUD ──────────────────────────────────────────────────────────
-
-@router.post("", status_code=201)
-async def create_workspace(
-    data: WorkspaceCreate,
-    current_user=Depends(get_current_user),
-    db=Depends(get_db),
-):
-    workspace_doc = {
-        "name": data.name,
-        "description": data.description or "",
-        "color": data.color,
-        "icon": data.icon,
-        "owner_id": current_user["id"],
-        "members": [
-            {
-                "user_id": current_user["id"],
-                "email": current_user["email"],
-                "full_name": current_user["full_name"],
-                "username": current_user["username"],
-                "role": MemberRole.OWNER,
-                "avatar_color": current_user.get("avatar_color", "#6366f1"),
-                "joined_at": utc_now(),
-            }
-        ],
-        "created_at": utc_now(),
-        "updated_at": utc_now(),
+      const res = await chatAPI.sendMessage(workspaceId, {
+        content: `📎 Shared a file: ${file.name}`,
+      })
+      setMessages((prev) => {
+        if (prev.some((m) => m.id === res.data.id)) return prev
+        return [...prev, res.data]
+      })
+      toast.success('File message sent')
+    } catch {
+      toast.error('Failed to share file')
+    } finally {
+      setSending(false)
+      if (fileInputRef.current) fileInputRef.current.value = ''
     }
-    result = await db.workspaces.insert_one(workspace_doc)
-    workspace_doc["_id"] = result.inserted_id
+  }
 
-    await log_activity(db, current_user["id"], str(result.inserted_id), "workspace_created",
-                       f'Workspace "{data.name}" created')
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: 20 }}
+      className="fixed bottom-6 right-6 w-80 h-96 card-elevated flex flex-col z-40 overflow-hidden"
+    >
+      {/* Header */}
+      <div className="flex items-center justify-between px-4 py-3 border-b border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-800">
+        <h3 className="font-semibold text-sm text-surface-900 dark:text-surface-100">Team Chat</h3>
+        <button onClick={onClose} className="text-surface-400 hover:text-surface-600 dark:hover:text-surface-300">
+          <RiCloseLine size={18} />
+        </button>
+      </div>
 
-    return serialize_doc(workspace_doc)
+      {/* Messages */}
+      <div className="flex-1 overflow-y-auto p-3 space-y-3 bg-surface-50 dark:bg-surface-900">
+        {loading ? (
+          <div className="flex items-center justify-center h-full">
+            <div className="w-5 h-5 border-2 border-primary-500/30 border-t-primary-500 rounded-full animate-spin" />
+          </div>
+        ) : messages.length === 0 ? (
+          <p className="text-center text-surface-400 text-xs py-8">No messages yet. Say hello! 👋</p>
+        ) : (
+          messages.map((msg) => (
+            <div
+              key={msg.id}
+              className={`flex gap-2 ${msg.user_id === user?.id ? 'flex-row-reverse' : ''}`}
+            >
+              <Avatar name={msg.author_name} color={msg.avatar_color} size="xs" />
+              <div className={`max-w-[75%] ${msg.user_id === user?.id ? 'items-end' : 'items-start'} flex flex-col`}>
+                <div
+                  className={`px-3 py-2 rounded-xl text-xs leading-relaxed ${
+                    msg.user_id === user?.id
+                      ? 'bg-primary-600 text-white rounded-tr-sm'
+                      : 'bg-white dark:bg-surface-800 text-surface-800 dark:text-surface-200 border border-surface-200 dark:border-surface-700 rounded-tl-sm'
+                  }`}
+                >
+                  {msg.content}
+                  {/* Show file attachments if message has them */}
+                  {msg.files?.map((f) => (
+                    <FileAttachment key={f.id || f.filename} file={f} />
+                  ))}
+                </div>
+                <span className="text-[10px] text-surface-400 mt-0.5 px-1">{formatRelative(msg.created_at)}</span>
+              </div>
+            </div>
+          ))
+        )}
+        <div ref={bottomRef} />
+      </div>
 
-
-@router.get("")
-async def get_my_workspaces(
-    current_user=Depends(get_current_user),
-    db=Depends(get_db),
-):
-    cursor = db.workspaces.find(
-        {"members.user_id": current_user["id"]}
-    ).sort("created_at", -1)
-
-    workspaces = []
-    async for ws in cursor:
-        w = serialize_doc(ws)
-        project_count = await db.projects.count_documents({"workspace_id": str(ws["_id"])})
-        w["project_count"] = project_count
-        workspaces.append(w)
-    return workspaces
-
-
-@router.get("/{workspace_id}")
-async def get_workspace(
-    workspace_id: str,
-    current_user=Depends(get_current_user),
-    db=Depends(get_db),
-):
-    ws = await db.workspaces.find_one({"_id": ObjectId(workspace_id)})
-    if not ws:
-        raise HTTPException(status_code=404, detail="Workspace not found")
-
-    member_ids = [m["user_id"] for m in ws.get("members", [])]
-    if current_user["id"] not in member_ids:
-        raise HTTPException(status_code=403, detail="Access denied")
-
-    w = serialize_doc(ws)
-    online_users = manager.get_online_users(workspace_id)
-    w["online_users"] = online_users
-    return w
-
-
-@router.put("/{workspace_id}")
-async def update_workspace(
-    workspace_id: str,
-    data: WorkspaceUpdate,
-    current_user=Depends(get_current_user),
-    db=Depends(get_db),
-):
-    ws = await db.workspaces.find_one({"_id": ObjectId(workspace_id)})
-    if not ws:
-        raise HTTPException(status_code=404, detail="Workspace not found")
-
-    member = next((m for m in ws.get("members", []) if m["user_id"] == current_user["id"]), None)
-    if not member or member["role"] not in [MemberRole.OWNER, MemberRole.ADMIN]:
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
-
-    update_data = {k: v for k, v in data.model_dump().items() if v is not None}
-    update_data["updated_at"] = utc_now()
-
-    await db.workspaces.update_one({"_id": ObjectId(workspace_id)}, {"$set": update_data})
-    updated = await db.workspaces.find_one({"_id": ObjectId(workspace_id)})
-
-    await log_activity(db, current_user["id"], workspace_id, "workspace_updated",
-                       f'Workspace "{ws["name"]}" updated')
-
-    await manager.broadcast_to_workspace(workspace_id, {
-        "type": "workspace_updated",
-        "workspace_id": workspace_id,
-    })
-
-    return serialize_doc(updated)
-
-
-@router.delete("/{workspace_id}", status_code=204)
-async def delete_workspace(
-    workspace_id: str,
-    current_user=Depends(get_current_user),
-    db=Depends(get_db),
-):
-    ws = await db.workspaces.find_one({"_id": ObjectId(workspace_id)})
-    if not ws:
-        raise HTTPException(status_code=404, detail="Workspace not found")
-
-    if ws["owner_id"] != current_user["id"]:
-        raise HTTPException(status_code=403, detail="Only the owner can delete the workspace")
-
-    await db.workspaces.delete_one({"_id": ObjectId(workspace_id)})
-
-    project_ids = []
-    async for p in db.projects.find({"workspace_id": workspace_id}):
-        project_ids.append(str(p["_id"]))
-
-    await db.projects.delete_many({"workspace_id": workspace_id})
-    if project_ids:
-        await db.tasks.delete_many({"project_id": {"$in": project_ids}})
-        await db.documents.delete_many({"project_id": {"$in": project_ids}})
-        await db.files.delete_many({"project_id": {"$in": project_ids}})
-
-    await db.chat_messages.delete_many({"workspace_id": workspace_id})
-    await db.activity_logs.delete_many({"workspace_id": workspace_id})
-    await db.pending_invites.delete_many({"workspace_id": workspace_id})
-
-
-@router.post("/{workspace_id}/invite")
-async def invite_member(
-    workspace_id: str,
-    data: InviteMember,
-    current_user=Depends(get_current_user),
-    db=Depends(get_db),
-):
-    ws = await db.workspaces.find_one({"_id": ObjectId(workspace_id)})
-    if not ws:
-        raise HTTPException(status_code=404, detail="Workspace not found")
-
-    member = next((m for m in ws.get("members", []) if m["user_id"] == current_user["id"]), None)
-    if not member or member["role"] not in [MemberRole.OWNER, MemberRole.ADMIN]:
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
-
-    already_member = any(m["email"] == data.email for m in ws.get("members", []))
-    if already_member:
-        raise HTTPException(status_code=400, detail="This person is already a member of the workspace")
-
-    existing_invite = await db.pending_invites.find_one({
-        "workspace_id": workspace_id,
-        "email": data.email,
-        "used": False,
-        "expires_at": {"$gt": utc_now()},
-    })
-    if existing_invite:
-        raise HTTPException(
-            status_code=400,
-            detail="An invite has already been sent to this email. It expires in 7 days."
-        )
-
-    token = secrets.token_urlsafe(32)
-    expires_at = utc_now() + timedelta(days=INVITE_EXPIRE_DAYS)
-
-    await db.pending_invites.insert_one({
-        "token": token,
-        "workspace_id": workspace_id,
-        "workspace_name": ws["name"],
-        "email": data.email,
-        "role": data.role if isinstance(data.role, str) else data.role.value,
-        "invited_by_id": current_user["id"],
-        "invited_by_name": current_user["full_name"],
-        "invited_by_email": current_user["email"],
-        "used": False,
-        "created_at": utc_now(),
-        "expires_at": expires_at,
-    })
-
-    try:
-        await send_workspace_invite_email(
-            to_email=data.email,
-            inviter_name=current_user["full_name"],
-            workspace_name=ws["name"],
-            role=data.role if isinstance(data.role, str) else data.role.value,
-            invite_token=token,
-        )
-    except Exception as e:
-        logger.error(f"Failed to send invite email to {data.email}: {e}")
-        raise HTTPException(
-            status_code=502,
-            detail="Invite created but email delivery failed. Check your email configuration."
-        )
-
-    await log_activity(
-        db, current_user["id"], workspace_id, "member_invited",
-        f'{current_user["full_name"]} invited {data.email} to the workspace'
-    )
-
-    return {"message": f"Invitation sent to {data.email}"}
-
-
-@router.delete("/{workspace_id}/members/{user_id}")
-async def remove_member(
-    workspace_id: str,
-    user_id: str,
-    current_user=Depends(get_current_user),
-    db=Depends(get_db),
-):
-    ws = await db.workspaces.find_one({"_id": ObjectId(workspace_id)})
-    if not ws:
-        raise HTTPException(status_code=404, detail="Workspace not found")
-
-    member = next((m for m in ws.get("members", []) if m["user_id"] == current_user["id"]), None)
-    is_owner = ws["owner_id"] == current_user["id"]
-    is_self = user_id == current_user["id"]
-
-    if not is_owner and not is_self:
-        if not member or member["role"] != MemberRole.ADMIN:
-            raise HTTPException(status_code=403, detail="Insufficient permissions")
-
-    if user_id == ws["owner_id"] and not is_self:
-        raise HTTPException(status_code=400, detail="Cannot remove the workspace owner")
-
-    await db.workspaces.update_one(
-        {"_id": ObjectId(workspace_id)},
-        {"$pull": {"members": {"user_id": user_id}}},
-    )
-
-    return {"message": "Member removed successfully"}
-
-
-@router.get("/{workspace_id}/activity")
-async def get_workspace_activity(
-    workspace_id: str,
-    limit: int = 50,
-    current_user=Depends(get_current_user),
-    db=Depends(get_db),
-):
-    ws = await db.workspaces.find_one({"_id": ObjectId(workspace_id)})
-    if not ws:
-        raise HTTPException(status_code=404, detail="Workspace not found")
-
-    member_ids = [m["user_id"] for m in ws.get("members", [])]
-    if current_user["id"] not in member_ids:
-        raise HTTPException(status_code=403, detail="Access denied")
-
-    cursor = db.activity_logs.find(
-        {"workspace_id": workspace_id}
-    ).sort("created_at", -1).limit(limit)
-
-    logs = []
-    async for log in cursor:
-        logs.append(serialize_doc(log))
-    return logs
+      {/* Input */}
+      <form onSubmit={handleSend} className="flex items-center gap-2 px-3 py-3 border-t border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-800">
+        <input
+          ref={fileInputRef}
+          type="file"
+          className="hidden"
+          onChange={handleFileUpload}
+          accept="image/*,.pdf,.doc,.docx,.txt,.csv,.xlsx"
+        />
+        <button
+          type="button"
+          onClick={() => fileInputRef.current?.click()}
+          className="p-2 rounded-lg text-surface-400 hover:text-primary-600 hover:bg-surface-100 dark:hover:bg-surface-700 transition-colors flex-shrink-0"
+          title="Attach file (stored temporarily)"
+        >
+          <RiAttachmentLine size={14} />
+        </button>
+        <input
+          className="flex-1 bg-surface-100 dark:bg-surface-700 rounded-lg px-3 py-2 text-xs text-surface-900 dark:text-surface-100 placeholder:text-surface-400 outline-none focus:ring-2 focus:ring-primary-500/30"
+          placeholder="Type a message..."
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          maxLength={2000}
+        />
+        <button
+          type="submit"
+          disabled={!input.trim() || sending}
+          className="p-2 rounded-lg bg-primary-600 hover:bg-primary-700 text-white disabled:opacity-50 transition-colors"
+        >
+          <RiSendPlaneLine size={14} />
+        </button>
+      </form>
+    </motion.div>
+  )
+}

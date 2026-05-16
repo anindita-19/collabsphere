@@ -1,11 +1,11 @@
 import { useState, useEffect } from 'react'
-import { useParams, useNavigate, NavLink } from 'react-router-dom'
+import { useParams, useNavigate, NavLink, useLocation, Outlet } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import toast from 'react-hot-toast'
 import {
   RiKanbanView, RiBarChartLine, RiFileTextLine,
-  RiSettings3Line, RiDeleteBinLine, RiArrowLeftLine,
-  RiEditLine, RiCalendarLine, RiHistoryLine,
+  RiDeleteBinLine, RiArrowLeftLine,
+  RiEditLine, RiCalendarLine,
 } from 'react-icons/ri'
 import { projectsAPI } from '@/services/apiServices'
 import ProjectModal from '@/components/ui/ProjectModal'
@@ -15,6 +15,7 @@ import { CardSkeleton } from '@/components/ui/LoadingScreen'
 export default function ProjectPage() {
   const { workspaceId, projectId } = useParams()
   const navigate = useNavigate()
+  const location = useLocation()
   const [project, setProject] = useState(null)
   const [loading, setLoading] = useState(true)
   const [showEdit, setShowEdit] = useState(false)
@@ -25,6 +26,17 @@ export default function ProjectPage() {
       .catch(() => { toast.error('Project not found'); navigate(`/workspace/${workspaceId}`) })
       .finally(() => setLoading(false))
   }, [projectId])
+
+  // Auto-redirect to kanban if on the base project path
+  useEffect(() => {
+    if (!loading && project) {
+      const isBasePath = location.pathname === `/workspace/${workspaceId}/project/${projectId}` ||
+                         location.pathname === `/workspace/${workspaceId}/project/${projectId}/`
+      if (isBasePath) {
+        navigate(`/workspace/${workspaceId}/project/${projectId}/kanban`, { replace: true })
+      }
+    }
+  }, [loading, project, location.pathname])
 
   const handleDelete = async () => {
     if (!confirm(`Delete "${project.name}"? This cannot be undone.`)) return
@@ -42,6 +54,12 @@ export default function ProjectPage() {
   const total = project?.total_tasks || 0
   const completed = project?.task_counts?.completed || 0
   const progress = total > 0 ? Math.round((completed / total) * 100) : 0
+
+  const tabs = [
+    { label: 'Kanban Board', path: 'kanban', icon: RiKanbanView },
+    { label: 'Analytics', path: 'analytics', icon: RiBarChartLine },
+    { label: 'Documents', path: 'docs', icon: RiFileTextLine },
+  ]
 
   return (
     <div className="max-w-6xl mx-auto space-y-6 animate-fade-in">
@@ -126,11 +144,7 @@ export default function ProjectPage() {
 
       {/* Sub-navigation */}
       <div className="flex items-center gap-1 border-b border-surface-200 dark:border-surface-800">
-        {[
-          { label: 'Kanban Board', path: 'kanban', icon: RiKanbanView },
-          { label: 'Analytics', path: 'analytics', icon: RiBarChartLine },
-          { label: 'Documents', path: 'docs', icon: RiFileTextLine },
-        ].map((tab) => (
+        {tabs.map((tab) => (
           <NavLink
             key={tab.path}
             to={`/workspace/${workspaceId}/project/${projectId}/${tab.path}`}
@@ -148,11 +162,8 @@ export default function ProjectPage() {
         ))}
       </div>
 
-      <div className="py-2">
-        <div className="text-center py-8 text-surface-400">
-          <p className="text-sm">Select a view above to continue</p>
-        </div>
-      </div>
+      {/* Child route renders here (Kanban / Analytics / Docs) */}
+      <Outlet />
 
       {showEdit && (
         <ProjectModal
