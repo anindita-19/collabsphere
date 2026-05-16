@@ -1,7 +1,28 @@
-import aiosmtplib
+import httpx
+import logging
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+import base64
 from app.config import settings
+
+logger = logging.getLogger(__name__)
+
+
+async def get_gmail_access_token() -> str:
+    """Exchange refresh token for a fresh access token via Google OAuth2."""
+    async with httpx.AsyncClient() as client:
+        response = await client.post(
+            "https://oauth2.googleapis.com/token",
+            data={
+                "client_id": settings.GMAIL_CLIENT_ID,
+                "client_secret": settings.GMAIL_CLIENT_SECRET,
+                "refresh_token": settings.GMAIL_REFRESH_TOKEN,
+                "grant_type": "refresh_token",
+            },
+        )
+        if response.status_code != 200:
+            raise Exception(f"Failed to get Gmail access token: {response.text}")
+        return response.json()["access_token"]
 
 
 async def send_workspace_invite_email(
@@ -11,7 +32,7 @@ async def send_workspace_invite_email(
     role: str,
     invite_token: str,
 ):
-    """Send a workspace invitation email via Gmail SMTP."""
+    """Send a workspace invitation email via Gmail API (OAuth2)."""
     accept_url = f"{settings.FRONTEND_URL}/invite/accept?token={invite_token}"
 
     role_descriptions = {
@@ -96,6 +117,7 @@ async def send_workspace_invite_email(
         f"If you weren't expecting this, you can safely ignore this email."
     )
 
+    # Build the MIME message
     msg = MIMEMultipart("alternative")
     msg["Subject"] = f"{inviter_name} invited you to \"{workspace_name}\" on CollabSphere"
     msg["From"] = f"CollabSphere <{settings.GMAIL_USER}>"
@@ -103,11 +125,24 @@ async def send_workspace_invite_email(
     msg.attach(MIMEText(text_body, "plain"))
     msg.attach(MIMEText(html_body, "html"))
 
-    await aiosmtplib.send(
-        msg,
-        hostname="smtp.gmail.com",
-        port=587,
-        username=settings.GMAIL_USER,
-        password=settings.GMAIL_APP_PASSWORD,
-        use_tls=True,
-    )
+    # Encode message to base64url format (required by Gmail API)
+    raw_message = base64.urlsafe_b64encode(msg.as_bytes()).decode("utf-8")
+
+    # Get fresh access token
+    access_token = await get_gmail_access_token()
+
+    # Send via Gmail API
+    async with httpx.AsyncClient() as client:
+        response = await client.post(
+            f"https://gmail.googleapis.com/gmail/v1/users/{settings.GMAIL_USER}/messages/send",
+            headers={
+                "Authorization": f"Bearer {access_token}",
+                "Content-Type": "application/json",
+            },
+            json={"raw": raw_message},
+        )
+
+    if response.status_code not in (200, 201):
+        raise Exception(f"Gmail API error {response.status_code}: {response.text}")
+
+    logger.info(f"Invite email sent to {to_email} via Gmail API")
