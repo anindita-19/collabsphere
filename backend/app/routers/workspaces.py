@@ -31,6 +31,125 @@ async def log_activity(db, user_id: str, workspace_id: str, action: str, descrip
     })
 
 
+# ── INVITE ROUTES MUST COME FIRST (before /{workspace_id}) ─────────────────
+# FastAPI matches routes top-to-bottom. If /{workspace_id} is defined first,
+# it will swallow /invite/accept treating "invite" as a workspace_id.
+
+@router.get("/invite/accept")
+async def accept_invite(
+    token: str,
+    db=Depends(get_db),
+):
+    """
+    Public endpoint — no auth required.
+    Validates the token and returns invite details so the frontend
+    can show the accept screen (register or login then join).
+    """
+    invite = await db.pending_invites.find_one({"token": token, "used": False})
+
+    if not invite:
+        raise HTTPException(status_code=404, detail="Invite not found or already used")
+
+    if invite["expires_at"] < utc_now():
+        raise HTTPException(status_code=410, detail="This invite link has expired")
+
+    return {
+        "token": token,
+        "workspace_name": invite["workspace_name"],
+        "workspace_id": invite["workspace_id"],
+        "email": invite["email"],
+        "role": invite["role"],
+        "invited_by": invite["invited_by_name"],
+    }
+
+
+@router.post("/invite/accept")
+async def confirm_accept_invite(
+    token: str,
+    current_user=Depends(get_current_user),
+    db=Depends(get_db),
+):
+    """
+    Authenticated endpoint.
+    After the user logs in / registers, call this to actually join the workspace.
+    The logged-in user's email must match the invite email.
+    """
+    invite = await db.pending_invites.find_one({"token": token, "used": False})
+
+    if not invite:
+        raise HTTPException(status_code=404, detail="Invite not found or already used")
+
+    if invite["expires_at"] < utc_now():
+        raise HTTPException(status_code=410, detail="This invite link has expired")
+
+    if current_user["email"].lower() != invite["email"].lower():
+        raise HTTPException(
+            status_code=403,
+            detail=f"This invite was sent to {invite['email']}. Please log in with that account."
+        )
+
+    workspace_id = invite["workspace_id"]
+    ws = await db.workspaces.find_one({"_id": ObjectId(workspace_id)})
+    if not ws:
+        raise HTTPException(status_code=404, detail="Workspace no longer exists")
+
+    # Check if already a member (e.g. added another way in the meantime)
+    already_member = any(m["user_id"] == current_user["id"] for m in ws.get("members", []))
+    if already_member:
+        await db.pending_invites.update_one({"token": token}, {"$set": {"used": True}})
+        return {"message": "You are already a member of this workspace", "workspace_id": workspace_id}
+
+    new_member = {
+        "user_id": current_user["id"],
+        "email": current_user["email"],
+        "full_name": current_user["full_name"],
+        "username": current_user["username"],
+        "role": invite["role"],
+        "avatar_color": current_user.get("avatar_color", "#6366f1"),
+        "joined_at": utc_now(),
+    }
+
+    await db.workspaces.update_one(
+        {"_id": ObjectId(workspace_id)},
+        {"$push": {"members": new_member}},
+    )
+
+    await db.pending_invites.update_one(
+        {"token": token},
+        {"$set": {"used": True, "accepted_at": utc_now(), "accepted_by": current_user["id"]}}
+    )
+
+    await db.notifications.insert_one({
+        "user_id": invite["invited_by_id"],
+        "type": "invite_accepted",
+        "title": "Invite Accepted",
+        "message": f'{current_user["full_name"]} accepted your invitation to "{ws["name"]}"',
+        "resource_id": workspace_id,
+        "resource_type": "workspace",
+        "read": False,
+        "created_at": utc_now(),
+    })
+
+    await log_activity(
+        db, current_user["id"], workspace_id, "member_joined",
+        f'{current_user["full_name"]} joined the workspace via invite'
+    )
+
+    await manager.broadcast_to_workspace(workspace_id, {
+        "type": "member_joined",
+        "workspace_id": workspace_id,
+        "user": {
+            "id": current_user["id"],
+            "full_name": current_user["full_name"],
+            "email": current_user["email"],
+        }
+    })
+
+    return {"message": "Successfully joined the workspace", "workspace_id": workspace_id}
+
+
+# ── Workspace CRUD ──────────────────────────────────────────────────────────
+
 @router.post("", status_code=201)
 async def create_workspace(
     data: WorkspaceCreate,
@@ -163,12 +282,8 @@ async def delete_workspace(
 
     await db.chat_messages.delete_many({"workspace_id": workspace_id})
     await db.activity_logs.delete_many({"workspace_id": workspace_id})
-
-    # Also clean up any pending invites for this workspace
     await db.pending_invites.delete_many({"workspace_id": workspace_id})
 
-
-# ── Invite (new flow: works for anyone, registered or not) ──────────────────
 
 @router.post("/{workspace_id}/invite")
 async def invite_member(
@@ -181,17 +296,14 @@ async def invite_member(
     if not ws:
         raise HTTPException(status_code=404, detail="Workspace not found")
 
-    # Only owner/admin can invite
     member = next((m for m in ws.get("members", []) if m["user_id"] == current_user["id"]), None)
     if not member or member["role"] not in [MemberRole.OWNER, MemberRole.ADMIN]:
         raise HTTPException(status_code=403, detail="Insufficient permissions")
 
-    # Check if already a member
     already_member = any(m["email"] == data.email for m in ws.get("members", []))
     if already_member:
         raise HTTPException(status_code=400, detail="This person is already a member of the workspace")
 
-    # Check for an existing unexpired pending invite for this email+workspace
     existing_invite = await db.pending_invites.find_one({
         "workspace_id": workspace_id,
         "email": data.email,
@@ -204,7 +316,6 @@ async def invite_member(
             detail="An invite has already been sent to this email. It expires in 7 days."
         )
 
-    # Generate a secure random token
     token = secrets.token_urlsafe(32)
     expires_at = utc_now() + timedelta(days=INVITE_EXPIRE_DAYS)
 
@@ -222,8 +333,6 @@ async def invite_member(
         "expires_at": expires_at,
     })
 
-    # Send the email — if it fails, we still return success but log the error
-    # so the invite record exists and can be resent
     try:
         await send_workspace_invite_email(
             to_email=data.email,
@@ -236,7 +345,7 @@ async def invite_member(
         logger.error(f"Failed to send invite email to {data.email}: {e}")
         raise HTTPException(
             status_code=502,
-            detail="Invite created but email delivery failed. Check your Resend configuration."
+            detail="Invite created but email delivery failed. Check your email configuration."
         )
 
     await log_activity(
@@ -245,125 +354,6 @@ async def invite_member(
     )
 
     return {"message": f"Invitation sent to {data.email}"}
-
-
-# ── Accept invite (called from magic link in email) ─────────────────────────
-
-@router.get("/invite/accept")
-async def accept_invite(
-    token: str,
-    db=Depends(get_db),
-):
-    """
-    Public endpoint — no auth required.
-    Validates the token and returns invite details so the frontend
-    can show the accept screen (register or login then join).
-    """
-    invite = await db.pending_invites.find_one({"token": token, "used": False})
-
-    if not invite:
-        raise HTTPException(status_code=404, detail="Invite not found or already used")
-
-    if invite["expires_at"] < utc_now():
-        raise HTTPException(status_code=410, detail="This invite link has expired")
-
-    return {
-        "token": token,
-        "workspace_name": invite["workspace_name"],
-        "workspace_id": invite["workspace_id"],
-        "email": invite["email"],
-        "role": invite["role"],
-        "invited_by": invite["invited_by_name"],
-    }
-
-
-@router.post("/invite/accept")
-async def confirm_accept_invite(
-    token: str,
-    current_user=Depends(get_current_user),
-    db=Depends(get_db),
-):
-    """
-    Authenticated endpoint.
-    After the user logs in / registers, call this to actually join the workspace.
-    The logged-in user's email must match the invite email.
-    """
-    invite = await db.pending_invites.find_one({"token": token, "used": False})
-
-    if not invite:
-        raise HTTPException(status_code=404, detail="Invite not found or already used")
-
-    if invite["expires_at"] < utc_now():
-        raise HTTPException(status_code=410, detail="This invite link has expired")
-
-    if current_user["email"].lower() != invite["email"].lower():
-        raise HTTPException(
-            status_code=403,
-            detail=f"This invite was sent to {invite['email']}. Please log in with that account."
-        )
-
-    workspace_id = invite["workspace_id"]
-    ws = await db.workspaces.find_one({"_id": ObjectId(workspace_id)})
-    if not ws:
-        raise HTTPException(status_code=404, detail="Workspace no longer exists")
-
-    # Check if already a member (e.g. added another way in the meantime)
-    already_member = any(m["user_id"] == current_user["id"] for m in ws.get("members", []))
-    if already_member:
-        # Mark invite used and return the workspace anyway
-        await db.pending_invites.update_one({"token": token}, {"$set": {"used": True}})
-        return {"message": "You are already a member of this workspace", "workspace_id": workspace_id}
-
-    new_member = {
-        "user_id": current_user["id"],
-        "email": current_user["email"],
-        "full_name": current_user["full_name"],
-        "username": current_user["username"],
-        "role": invite["role"],
-        "avatar_color": current_user.get("avatar_color", "#6366f1"),
-        "joined_at": utc_now(),
-    }
-
-    await db.workspaces.update_one(
-        {"_id": ObjectId(workspace_id)},
-        {"$push": {"members": new_member}},
-    )
-
-    # Mark invite as used
-    await db.pending_invites.update_one(
-        {"token": token},
-        {"$set": {"used": True, "accepted_at": utc_now(), "accepted_by": current_user["id"]}}
-    )
-
-    # In-app notification for the inviter
-    await db.notifications.insert_one({
-        "user_id": invite["invited_by_id"],
-        "type": "invite_accepted",
-        "title": "Invite Accepted",
-        "message": f'{current_user["full_name"]} accepted your invitation to "{ws["name"]}"',
-        "resource_id": workspace_id,
-        "resource_type": "workspace",
-        "read": False,
-        "created_at": utc_now(),
-    })
-
-    await log_activity(
-        db, current_user["id"], workspace_id, "member_joined",
-        f'{current_user["full_name"]} joined the workspace via invite'
-    )
-
-    # Broadcast presence update to workspace
-    await manager.broadcast_to_workspace(workspace_id, {
-        "type": "member_joined",
-        "workspace_id": workspace_id,
-        "user": {
-            "id": current_user["id"],
-            "full_name": current_user["full_name"],
-            "email": current_user["email"],
-        }
-    })
-
-    return {"message": "Successfully joined the workspace", "workspace_id": workspace_id}
 
 
 @router.delete("/{workspace_id}/members/{user_id}")
