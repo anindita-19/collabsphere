@@ -1,14 +1,23 @@
 from fastapi import APIRouter, HTTPException, Depends, UploadFile, File
-from fastapi.responses import FileResponse
+from fastapi.responses import RedirectResponse
 from bson import ObjectId
-import aiofiles
 import os
+import cloudinary
+import cloudinary.uploader
 from app.database import get_db
 from app.utils.helpers import serialize_doc, utc_now, generate_unique_filename
 from app.middleware.auth_middleware import get_current_user
 from app.config import settings
 
 router = APIRouter(prefix="/files", tags=["Files"])
+
+# Configure Cloudinary
+cloudinary.config(
+    cloud_name=settings.CLOUDINARY_CLOUD_NAME,
+    api_key=settings.CLOUDINARY_API_KEY,
+    api_secret=settings.CLOUDINARY_API_SECRET,
+    secure=True,
+)
 
 ALLOWED_EXTENSIONS = {
     ".jpg", ".jpeg", ".png", ".gif", ".webp",
@@ -17,8 +26,6 @@ ALLOWED_EXTENSIONS = {
     ".doc", ".docx",
     ".xls", ".xlsx",
     ".zip", ".rar", ".7z",
-    ".mp4", ".mov", ".avi",
-    ".mp3", ".wav",
     ".ppt", ".pptx",
     ".json", ".xml", ".yaml", ".yml",
     ".py", ".js", ".ts", ".html", ".css",
@@ -39,28 +46,44 @@ async def upload_file(
     current_user=Depends(get_current_user),
     db=Depends(get_db),
 ):
-    # Validate by extension instead of MIME type — browsers report MIME inconsistently
     if not is_allowed_file(file.filename):
         ext = os.path.splitext(file.filename)[-1].lower() or "(no extension)"
         raise HTTPException(status_code=400, detail=f"File type {ext} not allowed")
 
-    # Read file content
     content = await file.read()
     if len(content) > settings.MAX_UPLOAD_SIZE:
         raise HTTPException(status_code=400, detail="File too large (max 10MB)")
 
-    # Generate unique filename
-    unique_name = generate_unique_filename(file.filename)
-    upload_path = os.path.join(settings.UPLOAD_DIR, unique_name)
+    # Determine resource type for Cloudinary
+    ext = os.path.splitext(file.filename)[-1].lower()
+    image_exts = {".jpg", ".jpeg", ".png", ".gif", ".webp"}
+    video_exts = {".mp4", ".mov", ".avi"}
 
-    os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
-    async with aiofiles.open(upload_path, "wb") as f:
-        await f.write(content)
+    if ext in image_exts:
+        resource_type = "image"
+    elif ext in video_exts:
+        resource_type = "video"
+    else:
+        resource_type = "raw"
 
-    # Store metadata in DB
+    # Upload to Cloudinary
+    try:
+        upload_result = cloudinary.uploader.upload(
+            content,
+            resource_type=resource_type,
+            public_id=f"collabsphere/{generate_unique_filename(file.filename).split('.')[0]}",
+            original_filename=file.filename,
+            use_filename=False,
+        )
+        file_url = upload_result["secure_url"]
+        cloudinary_public_id = upload_result["public_id"]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"File upload failed: {str(e)}")
+
+    # Store metadata in MongoDB
     file_doc = {
         "original_name": file.filename,
-        "stored_name": unique_name,
+        "stored_name": cloudinary_public_id,
         "content_type": file.content_type or "application/octet-stream",
         "size": len(content),
         "task_id": task_id,
@@ -68,7 +91,8 @@ async def upload_file(
         "workspace_id": workspace_id,
         "uploaded_by": current_user["id"],
         "uploader_name": current_user["full_name"],
-        "path": upload_path,
+        "url": file_url,                          # permanent Cloudinary URL
+        "cloudinary_public_id": cloudinary_public_id,
         "created_at": utc_now(),
     }
 
@@ -114,14 +138,12 @@ async def download_file(
     if not file_doc:
         raise HTTPException(status_code=404, detail="File not found")
 
-    if not os.path.exists(file_doc["path"]):
-        raise HTTPException(status_code=404, detail="File not found on disk")
+    # Redirect to Cloudinary URL (permanent, no disk dependency)
+    url = file_doc.get("url")
+    if not url:
+        raise HTTPException(status_code=404, detail="File URL not available")
 
-    return FileResponse(
-        path=file_doc["path"],
-        filename=file_doc["original_name"],
-        media_type=file_doc["content_type"],
-    )
+    return RedirectResponse(url=url)
 
 
 @router.delete("/{file_id}", status_code=204)
@@ -137,8 +159,21 @@ async def delete_file(
     if file_doc["uploaded_by"] != current_user["id"]:
         raise HTTPException(status_code=403, detail="Cannot delete others' files")
 
-    # Remove from disk
-    if os.path.exists(file_doc["path"]):
-        os.remove(file_doc["path"])
+    # Delete from Cloudinary
+    public_id = file_doc.get("cloudinary_public_id")
+    if public_id:
+        try:
+            ext = os.path.splitext(file_doc["original_name"])[-1].lower()
+            image_exts = {".jpg", ".jpeg", ".png", ".gif", ".webp"}
+            video_exts = {".mp4", ".mov", ".avi"}
+            if ext in image_exts:
+                resource_type = "image"
+            elif ext in video_exts:
+                resource_type = "video"
+            else:
+                resource_type = "raw"
+            cloudinary.uploader.destroy(public_id, resource_type=resource_type)
+        except Exception:
+            pass  # Don't fail the delete if Cloudinary cleanup fails
 
     await db.files.delete_one({"_id": ObjectId(file_id)})
