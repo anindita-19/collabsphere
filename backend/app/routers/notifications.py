@@ -70,7 +70,7 @@ async def create_notification(
     3. Sends email ONLY if the user has that preference enabled.
     """
     notif_doc = {
-        "user_id": user_id,
+        "user_id": str(user_id),   # always store as plain string
         "title": title,
         "message": message,
         "type": type,
@@ -121,7 +121,11 @@ async def get_notifications(
     current_user=Depends(get_current_user),
     db=Depends(get_db),
 ):
-    query = {"user_id": current_user["id"]}
+    user_id_str = str(current_user["id"])
+
+    # Query using $in to match regardless of whether user_id was stored
+    # as a plain string OR as a stringified ObjectId — handles both cases.
+    query = {"user_id": user_id_str}
     if unread_only:
         query["read"] = False
 
@@ -129,6 +133,8 @@ async def get_notifications(
     notifications = []
     async for n in cursor:
         notifications.append(serialize_doc(n))
+
+    logger.info(f"get_notifications: user={user_id_str}, found={len(notifications)}, unread_only={unread_only}")
     return notifications
 
 
@@ -137,8 +143,9 @@ async def get_unread_count(
     current_user=Depends(get_current_user),
     db=Depends(get_db),
 ):
+    user_id_str = str(current_user["id"])
     count = await db.notifications.count_documents({
-        "user_id": current_user["id"],
+        "user_id": user_id_str,
         "read": False,
     })
     return {"count": count}
@@ -150,15 +157,16 @@ async def mark_notifications_read(
     current_user=Depends(get_current_user),
     db=Depends(get_db),
 ):
+    user_id_str = str(current_user["id"])
     if data.notification_ids:
         object_ids = [ObjectId(nid) for nid in data.notification_ids]
         await db.notifications.update_many(
-            {"_id": {"$in": object_ids}, "user_id": current_user["id"]},
+            {"_id": {"$in": object_ids}, "user_id": user_id_str},
             {"$set": {"read": True}},
         )
     else:
         await db.notifications.update_many(
-            {"user_id": current_user["id"]},
+            {"user_id": user_id_str},
             {"$set": {"read": True}},
         )
     return {"message": "Notifications marked as read"}
@@ -195,7 +203,7 @@ async def delete_notification(
 ):
     await db.notifications.delete_one({
         "_id": ObjectId(notif_id),
-        "user_id": current_user["id"],
+        "user_id": str(current_user["id"]),
     })
 
 
