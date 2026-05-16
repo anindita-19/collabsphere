@@ -2,7 +2,7 @@ import logging
 from fastapi import APIRouter, HTTPException, Depends
 from bson import ObjectId
 from app.database import get_db
-from app.schemas.schemas import ChatMessage, NotificationMarkRead
+from app.schemas.schemas import ChatMessage, NotificationMarkRead, NotificationPreferences
 from app.utils.helpers import serialize_doc, utc_now
 from app.middleware.auth_middleware import get_current_user
 from app.websocket.manager import manager
@@ -24,6 +24,31 @@ async def _send_notif_email_safe(to_email: str, subject: str, body: str):
         logger.warning(f"Notification email failed (non-fatal): {e}")
 
 
+# ── Preference key → notification type mapping ────────────────────────────────
+
+_PREF_KEY_FOR_TYPE = {
+    "task_assigned":   "task_assignments",
+    "task_completed":  "task_completions",
+    "comment_added":   "comments",
+    "workspace_invite": "workspace_updates",
+    "project_updated": "workspace_updates",
+}
+
+DEFAULT_PREFS = {
+    "task_assignments": True,
+    "task_completions": True,
+    "comments": True,
+    "workspace_updates": True,
+}
+
+
+async def _get_user_prefs(db, user_id: str) -> dict:
+    user = await db.users.find_one({"_id": ObjectId(user_id)})
+    if not user:
+        return DEFAULT_PREFS
+    return {**DEFAULT_PREFS, **user.get("notification_preferences", {})}
+
+
 # ── Core helper called from tasks.py / workspaces.py ─────────────────────────
 
 async def create_notification(
@@ -39,12 +64,9 @@ async def create_notification(
     task_id: str = None,
 ):
     """
-    1. Saves an in-app notification to MongoDB.
-    2. Pushes it live via WebSocket.
-    3. Sends an email via Gmail OAuth2.
-
-    Import and call this from tasks.py / workspaces.py wherever
-    you assign tasks, complete tasks, leave comments, etc.
+    1. Always saves an in-app notification to MongoDB.
+    2. Always pushes it live via WebSocket.
+    3. Sends email ONLY if the user has that preference enabled.
     """
     notif_doc = {
         "user_id": user_id,
@@ -59,22 +81,31 @@ async def create_notification(
     }
     result = await db.notifications.insert_one(notif_doc)
     notif_doc["_id"] = result.inserted_id
+    serialized = serialize_doc(notif_doc)
 
-    # Push in-app via WebSocket
+    # Always push in-app via WebSocket
     if workspace_id:
         await manager.broadcast_to_workspace(workspace_id, {
             "type": "notification",
-            "notification": serialize_doc(notif_doc),
+            "notification": serialized,
         })
+    # Also send directly to user in case they're in a different workspace view
+    await manager.send_to_user(user_id, {
+        "type": "notification",
+        "notification": serialized,
+    })
 
-    # Send email via Gmail (non-fatal)
-    await _send_notif_email_safe(
-        to_email=user_email,
-        subject=f"CollabSphere: {title}",
-        body=message,
-    )
+    # Send email only if user preference allows it
+    pref_key = _PREF_KEY_FOR_TYPE.get(type, "workspace_updates")
+    prefs = await _get_user_prefs(db, user_id)
+    if prefs.get(pref_key, True):
+        await _send_notif_email_safe(
+            to_email=user_email,
+            subject=f"CollabSphere: {title}",
+            body=message,
+        )
 
-    return serialize_doc(notif_doc)
+    return serialized
 
 
 # ── Notifications router ──────────────────────────────────────────────────────
@@ -142,6 +173,29 @@ async def delete_notification(
         "_id": ObjectId(notif_id),
         "user_id": current_user["id"],
     })
+
+
+@notif_router.get("/preferences")
+async def get_notification_preferences(
+    current_user=Depends(get_current_user),
+    db=Depends(get_db),
+):
+    prefs = await _get_user_prefs(db, current_user["id"])
+    return prefs
+
+
+@notif_router.put("/preferences")
+async def update_notification_preferences(
+    data: NotificationPreferences,
+    current_user=Depends(get_current_user),
+    db=Depends(get_db),
+):
+    prefs = data.model_dump()
+    await db.users.update_one(
+        {"_id": ObjectId(current_user["id"])},
+        {"$set": {"notification_preferences": prefs}},
+    )
+    return prefs
 
 
 # ── Chat router ───────────────────────────────────────────────────────────────

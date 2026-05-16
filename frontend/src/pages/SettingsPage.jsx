@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import {
@@ -6,12 +7,41 @@ import {
 } from 'react-icons/ri'
 import useAppStore from '@/store/appStore'
 import useAuthStore from '@/store/authStore'
+import { notificationsAPI } from '@/services/apiServices'
 import toast from 'react-hot-toast'
 
 export default function SettingsPage() {
   const { theme, toggleTheme } = useAppStore()
   const { logout, user } = useAuthStore()
   const navigate = useNavigate()
+
+  const DEFAULT_PREFS = {
+    task_assignments: true,
+    task_completions: true,
+    comments: true,
+    workspace_updates: true,
+  }
+  const [prefs, setPrefs] = useState(DEFAULT_PREFS)
+  const [prefsLoading, setPrefsLoading] = useState(true)
+
+  useEffect(() => {
+    notificationsAPI.getPreferences()
+      .then((r) => setPrefs(r.data))
+      .catch(() => {})
+      .finally(() => setPrefsLoading(false))
+  }, [])
+
+  const handlePrefToggle = async (key) => {
+    const updated = { ...prefs, [key]: !prefs[key] }
+    setPrefs(updated)
+    try {
+      await notificationsAPI.updatePreferences(updated)
+      toast.success('Preference saved')
+    } catch {
+      setPrefs(prefs) // revert on failure
+      toast.error('Failed to save preference')
+    }
+  }
 
   const handleLogout = () => {
     logout()
@@ -78,32 +108,34 @@ export default function SettingsPage() {
         </div>
       </Section>
 
-      {/* Notifications */}
       <Section title="Notifications" icon={RiBellLine}>
+        <p className="text-xs text-surface-400 -mt-2">
+          In-app notifications are always on. These toggles control <strong>email</strong> delivery only.
+        </p>
         <div className="space-y-1 divide-y divide-surface-100 dark:divide-surface-700">
           <ToggleRow
             label="Task assignments"
-            description="Notify when you're assigned to a task"
-            checked={true}
-            onChange={() => toast('Notification preferences coming soon')}
+            description="Email when you're assigned to a task"
+            checked={prefs.task_assignments}
+            onChange={() => handlePrefToggle('task_assignments')}
           />
           <ToggleRow
             label="Task completions"
-            description="Notify when tasks you created are completed"
-            checked={true}
-            onChange={() => toast('Notification preferences coming soon')}
+            description="Email when tasks you created are completed"
+            checked={prefs.task_completions}
+            onChange={() => handlePrefToggle('task_completions')}
           />
           <ToggleRow
             label="Comments"
-            description="Notify when someone comments on your tasks"
-            checked={true}
-            onChange={() => toast('Notification preferences coming soon')}
+            description="Email when someone comments on your tasks"
+            checked={prefs.comments}
+            onChange={() => handlePrefToggle('comments')}
           />
           <ToggleRow
             label="Workspace updates"
-            description="Notify on workspace activity and invitations"
-            checked={true}
-            onChange={() => toast('Notification preferences coming soon')}
+            description="Email on workspace activity and invitations"
+            checked={prefs.workspace_updates}
+            onChange={() => handlePrefToggle('workspace_updates')}
           />
         </div>
       </Section>

@@ -9,7 +9,7 @@ export function useWebSocket(workspaceId, onMessage) {
   const reconnectRef = useRef(null)
   const [isConnected, setIsConnected] = useState(false)
   const { token } = useAuthStore()
-  const { setOnlineUsers } = useAppStore()
+  const { setOnlineUsers, setUnreadCount, unreadCount } = useAppStore()
 
   const connect = useCallback(() => {
     if (!workspaceId || !token) return
@@ -32,6 +32,9 @@ export function useWebSocket(workspaceId, onMessage) {
           setOnlineUsers(message.online_users || [])
         } else if (message.type === 'presence') {
           // Handle individual presence updates
+        } else if (message.type === 'notification') {
+          // Increment unread badge count in real time
+          setUnreadCount(unreadCount + 1)
         }
 
         if (onMessage) onMessage(message)

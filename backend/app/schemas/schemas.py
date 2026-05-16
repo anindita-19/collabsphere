@@ -166,3 +166,10 @@ class ChatMessage(BaseModel):
 
 class NotificationMarkRead(BaseModel):
     notification_ids: List[str] = []
+
+
+class NotificationPreferences(BaseModel):
+    task_assignments: bool = True
+    task_completions: bool = True
+    comments: bool = True
+    workspace_updates: bool = True

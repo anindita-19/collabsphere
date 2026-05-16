@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { RiBellLine, RiCheckDoubleLine, RiDeleteBinLine } from 'react-icons/ri'
 import { notificationsAPI } from '@/services/apiServices'
 import useAppStore from '@/store/appStore'
+import { useWebSocket } from '@/hooks/useWebSocket'
 import EmptyState from '@/components/ui/EmptyState'
 import { formatRelative } from '@/utils/helpers'
 import toast from 'react-hot-toast'
@@ -18,15 +19,25 @@ const TYPE_CONFIG = {
 
 export default function NotificationsPage() {
   const { setUnreadCount } = useAppStore()
+  const { activeWorkspace } = useAppStore()
   const [notifications, setNotifications] = useState([])
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState('all')
 
-  useEffect(() => {
+  const fetchNotifications = () => {
     notificationsAPI.getAll()
       .then((r) => setNotifications(r.data))
       .finally(() => setLoading(false))
-  }, [])
+  }
+
+  useEffect(() => { fetchNotifications() }, [])
+
+  // Re-fetch whenever a new notification arrives via WebSocket
+  useWebSocket(activeWorkspace?.id, (msg) => {
+    if (msg.type === 'notification') {
+      fetchNotifications()
+    }
+  })
 
   const markAllRead = async () => {
     await notificationsAPI.markRead({ notification_ids: [] })
