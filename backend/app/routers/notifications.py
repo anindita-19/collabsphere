@@ -27,11 +27,12 @@ async def _send_notif_email_safe(to_email: str, subject: str, body: str):
 # ── Preference key → notification type mapping ────────────────────────────────
 
 _PREF_KEY_FOR_TYPE = {
-    "task_assigned":   "task_assignments",
-    "task_completed":  "task_completions",
-    "comment_added":   "comments",
+    "task_assigned":    "task_assignments",
+    "task_completed":   "task_completions",
+    "comment_added":    "comments",
     "workspace_invite": "workspace_updates",
-    "project_updated": "workspace_updates",
+    "invite_accepted":  "workspace_updates",
+    "project_updated":  "workspace_updates",
 }
 
 DEFAULT_PREFS = {
@@ -163,18 +164,6 @@ async def mark_notifications_read(
     return {"message": "Notifications marked as read"}
 
 
-@notif_router.delete("/{notif_id}", status_code=204)
-async def delete_notification(
-    notif_id: str,
-    current_user=Depends(get_current_user),
-    db=Depends(get_db),
-):
-    await db.notifications.delete_one({
-        "_id": ObjectId(notif_id),
-        "user_id": current_user["id"],
-    })
-
-
 @notif_router.get("/preferences")
 async def get_notification_preferences(
     current_user=Depends(get_current_user),
@@ -196,6 +185,18 @@ async def update_notification_preferences(
         {"$set": {"notification_preferences": prefs}},
     )
     return prefs
+
+
+@notif_router.delete("/{notif_id}", status_code=204)
+async def delete_notification(
+    notif_id: str,
+    current_user=Depends(get_current_user),
+    db=Depends(get_db),
+):
+    await db.notifications.delete_one({
+        "_id": ObjectId(notif_id),
+        "user_id": current_user["id"],
+    })
 
 
 # ── Chat router ───────────────────────────────────────────────────────────────

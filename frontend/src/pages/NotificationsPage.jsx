@@ -9,12 +9,13 @@ import { formatRelative } from '@/utils/helpers'
 import toast from 'react-hot-toast'
 
 const TYPE_CONFIG = {
-  task_assigned: { icon: '🎯', color: 'bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800/40' },
-  task_completed: { icon: '✅', color: 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800/40' },
-  comment_added: { icon: '💬', color: 'bg-violet-50 dark:bg-violet-900/20 border-violet-200 dark:border-violet-800/40' },
+  task_assigned:    { icon: '🎯', color: 'bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800/40' },
+  task_completed:   { icon: '✅', color: 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800/40' },
+  comment_added:    { icon: '💬', color: 'bg-violet-50 dark:bg-violet-900/20 border-violet-200 dark:border-violet-800/40' },
   workspace_invite: { icon: '🏢', color: 'bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800/40' },
-  project_updated: { icon: '📋', color: 'bg-indigo-50 dark:bg-indigo-900/20 border-indigo-200 dark:border-indigo-800/40' },
-  default: { icon: '🔔', color: 'bg-surface-50 dark:bg-surface-800 border-surface-200 dark:border-surface-700' },
+  invite_accepted:  { icon: '🤝', color: 'bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800/40' },
+  project_updated:  { icon: '📋', color: 'bg-indigo-50 dark:bg-indigo-900/20 border-indigo-200 dark:border-indigo-800/40' },
+  default:          { icon: '🔔', color: 'bg-surface-50 dark:bg-surface-800 border-surface-200 dark:border-surface-700' },
 }
 
 export default function NotificationsPage() {

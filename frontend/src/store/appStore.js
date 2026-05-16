@@ -26,7 +26,11 @@ const useAppStore = create(
 
       // Notifications count
       unreadCount: 0,
-      setUnreadCount: (count) => set({ unreadCount: count }),
+      setUnreadCount: (countOrUpdater) => set((s) => ({
+        unreadCount: typeof countOrUpdater === 'function'
+          ? countOrUpdater(s.unreadCount)
+          : countOrUpdater
+      })),
       decrementUnread: () => set((s) => ({ unreadCount: Math.max(0, s.unreadCount - 1) })),
 
       // Online users in current workspace
