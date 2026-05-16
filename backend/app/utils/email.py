@@ -106,7 +106,7 @@ async def send_workspace_invite_email(
     await aiosmtplib.send(
         msg,
         hostname="smtp.gmail.com",
-        port=465,
+        port=587,
         username=settings.GMAIL_USER,
         password=settings.GMAIL_APP_PASSWORD,
         use_tls=True,
