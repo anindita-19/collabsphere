@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate, useOutletContext } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import toast from 'react-hot-toast'
 import {
@@ -30,6 +30,7 @@ const COLUMNS = [
 export default function KanbanPage() {
   const { workspaceId, projectId } = useParams()
   const navigate = useNavigate()
+  const { onTaskMoved } = useOutletContext() || {}
   const { user } = useAuthStore()
   const [tasks, setTasks] = useState([])
   const [loading, setLoading] = useState(true)
@@ -100,6 +101,8 @@ export default function KanbanPage() {
 
     try {
       await tasksAPI.move(projectId, taskId, { status: targetStatus, position: targetIndex })
+      // Refresh project header stats (total, completed, progress %) immediately
+      onTaskMoved?.()
     } catch {
       toast.error('Failed to move task')
       loadTasks()
@@ -113,6 +116,7 @@ export default function KanbanPage() {
       return [task, ...prev]
     })
     setShowCreateModal(false)
+    onTaskMoved?.()  // refresh total task count in header
   }
 
   const handleTaskDeleted = async (taskId) => {
@@ -122,6 +126,7 @@ export default function KanbanPage() {
       setTasks((prev) => prev.filter((t) => t.id !== taskId))
       setSelectedTask(null)
       toast.success('Task deleted')
+      onTaskMoved?.()  // refresh total task count in header
     } catch {
       toast.error('Failed to delete task')
     }

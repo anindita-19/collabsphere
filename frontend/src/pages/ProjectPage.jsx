@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useParams, useNavigate, NavLink, useLocation, Outlet } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import toast from 'react-hot-toast'
@@ -20,12 +20,14 @@ export default function ProjectPage() {
   const [loading, setLoading] = useState(true)
   const [showEdit, setShowEdit] = useState(false)
 
-  useEffect(() => {
+  const fetchProject = useCallback(() => {
     projectsAPI.get(workspaceId, projectId)
       .then((res) => setProject(res.data))
       .catch(() => { toast.error('Project not found'); navigate(`/workspace/${workspaceId}`) })
       .finally(() => setLoading(false))
   }, [projectId])
+
+  useEffect(() => { fetchProject() }, [fetchProject])
 
   // Auto-redirect to kanban if on the base project path
   useEffect(() => {
@@ -162,8 +164,8 @@ export default function ProjectPage() {
         ))}
       </div>
 
-      {/* Child route renders here (Kanban / Analytics / Docs) */}
-      <Outlet />
+      {/* Pass fetchProject down so KanbanPage can trigger a stats refresh */}
+      <Outlet context={{ onTaskMoved: fetchProject }} />
 
       {showEdit && (
         <ProjectModal

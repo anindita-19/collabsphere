@@ -7,6 +7,7 @@ import {
 } from 'recharts'
 import { RiBarChartLine, RiTeamLine, RiCheckboxCircleLine, RiTimeLine, RiArrowLeftLine } from 'react-icons/ri'
 import { analyticsAPI, projectsAPI } from '@/services/apiServices'
+import useAppStore from '@/store/appStore'
 import { CardSkeleton } from '@/components/ui/LoadingScreen'
 import Avatar from '@/components/ui/Avatar'
 
@@ -57,6 +58,7 @@ const CustomTooltip = ({ active, payload, label }) => {
 export default function AnalyticsPage() {
   const { workspaceId, projectId } = useParams()
   const navigate = useNavigate()
+  const { onlineUsers } = useAppStore()
   const [analytics, setAnalytics] = useState(null)
   const [projectAnalytics, setProjectAnalytics] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -140,7 +142,7 @@ export default function AnalyticsPage() {
         <StatCard
           label="Team Members"
           value={analytics?.member_count ?? '—'}
-          sub={`${analytics?.online_users ?? 0} online now`}
+          sub={`${onlineUsers.length} online now`}
           icon={RiTeamLine}
           color="#06b6d4"
           index={2}

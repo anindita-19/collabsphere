@@ -17,7 +17,11 @@ export function formatDate(date) {
 
 export function formatRelative(date) {
   if (!date) return ''
-  return formatDistanceToNow(new Date(date), { addSuffix: true })
+  // Ensure UTC strings without Z are treated as UTC, not local time
+  const iso = typeof date === 'string' && !date.endsWith('Z') && !date.includes('+')
+    ? date + 'Z'
+    : date
+  return formatDistanceToNow(new Date(iso), { addSuffix: true })
 }
 
 export function formatFileSize(bytes) {

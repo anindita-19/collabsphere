@@ -23,7 +23,7 @@ export default function WorkspacePage() {
   const { workspaceId } = useParams()
   const navigate = useNavigate()
   const { user } = useAuthStore()
-  const { setActiveWorkspace } = useAppStore()
+  const { setActiveWorkspace, onlineUsers } = useAppStore()
 
   const [workspace, setWorkspace] = useState(null)
   const [projects, setProjects] = useState([])
@@ -187,7 +187,7 @@ export default function WorkspacePage() {
                     <p className="text-xs font-medium text-slate-900 dark:text-slate-100 truncate">{m.full_name}</p>
                     <p className="text-[10px] text-slate-400 capitalize">{m.role}</p>
                   </div>
-                  <span className={`w-2 h-2 rounded-full ${workspace?.online_users?.includes(m.user_id) ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-600'}`} />
+                  <span className={`w-2 h-2 rounded-full ${onlineUsers.includes(m.user_id) ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-600'}`} />
                 </div>
               ))}
             </div>
