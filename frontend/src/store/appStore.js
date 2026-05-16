@@ -1,51 +1,50 @@
-import { create } from 'zustand'
-import { persist } from 'zustand/middleware'
+import { Outlet } from 'react-router-dom'
+import { useEffect } from 'react'
+import Sidebar from './Sidebar'
+import TopBar from './TopBar'
+import useAppStore from '@/store/appStore'
+import useAuthStore from '@/store/authStore'
+import { notificationsAPI } from '@/services/apiServices'
+import CommandPalette from '@/components/ui/CommandPalette'
+import { useKeyboard } from '@/hooks/useAsync'
 
-const useAppStore = create(
-  persist(
-    (set, get) => ({
-      // Theme
-      theme: 'light',
-      toggleTheme: () => {
-        const newTheme = get().theme === 'light' ? 'dark' : 'light'
-        set({ theme: newTheme })
-        document.documentElement.classList.toggle('dark', newTheme === 'dark')
-      },
-      initTheme: () => {
-        const { theme } = get()
-        document.documentElement.classList.toggle('dark', theme === 'dark')
-      },
+export default function AppLayout() {
+  const { sidebarCollapsed, setUnreadCount, commandPaletteOpen, setCommandPaletteOpen } = useAppStore()
+  const { initAuth } = useAuthStore()
 
-      // Active workspace
-      activeWorkspace: null,
-      setActiveWorkspace: (ws) => set({ activeWorkspace: ws }),
+  useEffect(() => {
+    // MUST call initAuth first — it restores the Authorization header from
+    // the persisted token. Without this, every API call after a page refresh
+    // goes out without a token and the backend returns 401 silently.
+    initAuth()
 
-      // Sidebar
-      sidebarCollapsed: false,
-      toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
+    // Now safe to make API calls — header is set synchronously by initAuth
+    notificationsAPI.getUnreadCount()
+      .then((res) => setUnreadCount(res.data.count))
+      .catch(() => {})
 
-      // Notifications count
-      unreadCount: 0,
-      setUnreadCount: (countOrUpdater) => set((s) => ({
-        unreadCount: typeof countOrUpdater === 'function'
-          ? countOrUpdater(s.unreadCount)
-          : countOrUpdater
-      })),
-      decrementUnread: () => set((s) => ({ unreadCount: Math.max(0, s.unreadCount - 1) })),
+    const interval = setInterval(() => {
+      notificationsAPI.getUnreadCount()
+        .then((res) => setUnreadCount(res.data.count))
+        .catch(() => {})
+    }, 30000)
 
-      // Online users in current workspace
-      onlineUsers: [],
-      setOnlineUsers: (users) => set({ onlineUsers: users }),
+    return () => clearInterval(interval)
+  }, [])
 
-      // Command palette
-      commandPaletteOpen: false,
-      setCommandPaletteOpen: (open) => set({ commandPaletteOpen: open }),
-    }),
-    {
-      name: 'collabsphere-app',
-      partialize: (state) => ({ theme: state.theme, sidebarCollapsed: state.sidebarCollapsed }),
-    }
+  // Keyboard shortcut for command palette
+  useKeyboard('k', () => setCommandPaletteOpen(true), [])
+
+  return (
+    <div className="flex h-screen overflow-hidden bg-surface-50 dark:bg-surface-950">
+      <Sidebar />
+      <div className={`flex-1 flex flex-col overflow-hidden transition-all duration-300`}>
+        <TopBar />
+        <main className="flex-1 overflow-auto p-6">
+          <Outlet />
+        </main>
+      </div>
+      {commandPaletteOpen && <CommandPalette onClose={() => setCommandPaletteOpen(false)} />}
+    </div>
   )
-)
-
-export default useAppStore
+}
