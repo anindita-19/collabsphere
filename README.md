@@ -22,22 +22,22 @@ Try the live deployment — no setup required. Create an account and explore the
 ## 📸 Screenshots
 
 ### Landing Page
-![LandingPage](screenshots/Landing Page.png)
+![Landing Page](screenshots/landing_page.png)
 
 ### Dashboard
-![Dashboard](screenshots/Dashboard.png)
+![Dashboard](screenshots/dashboard.png)
 
 ### Kanban Board
-![Kanban Board](screenshots/Kanban.png)
+![Kanban Board](screenshots/kanban.png)
 
 ### Analytics
-![Analytics](screenshots/Analytics.png)
+![Analytics](screenshots/analytics.png)
 
 ### Documents
-![Documents](screenshots/Documents.png)
+![Documents](screenshots/documents.png)
 
 ### Workspace Chat
-![Chat](screenshots/WorkspaceChat.png)
+![Chat](screenshots/chat.png)
 
 
 ## ✨ Features
