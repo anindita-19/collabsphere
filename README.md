@@ -39,6 +39,28 @@ Try the live deployment — no setup required. Create an account and explore the
 ### Workspace Chat
 ![Chat](screenshots/chat.png)
 
+---
+
+> **📁 How to make screenshots show up on GitHub:**
+>
+> 1. Create a folder named `screenshots/` at the root of your project (same level as `backend/` and `frontend/`).
+> 2. Save your screenshots using **exactly these filenames** (no spaces — use underscores):
+>    - `landing_page.png`
+>    - `dashboard.png`
+>    - `kanban.png`
+>    - `analytics.png`
+>    - `documents.png`
+>    - `chat.png`
+> 3. ⚠️ **Never use spaces in filenames** — `Landing Page.png` will break rendering. Always use `landing_page.png` style.
+> 4. Commit and push the folder:
+>    ```bash
+>    git add screenshots/
+>    git commit -m "docs: add screenshots"
+>    git push
+>    ```
+> 5. Refresh your GitHub repo page — images render inline automatically. Filenames are **case-sensitive** on GitHub (`dashboard.png` ≠ `Dashboard.png`).
+
+---
 
 ## ✨ Features
 
@@ -586,31 +608,35 @@ CORS_ORIGINS=https://your-frontend-domain.com
 
 ## 🔮 Future Advancements
 
-This section tracks planned improvements and the roadmap for CollabSphere. Contributions and suggestions are welcome!
-
-### 🔄 CI/CD — Auto-Deploy on Every GitHub Push
-
-Currently the frontend is deployed manually to Vercel. The goal is to connect the GitHub repository directly so that every push to `main` triggers an automatic production deployment — no manual steps required.
-
-**How to set this up (Vercel + GitHub):**
-
-1. Go to [vercel.com](https://vercel.com) → **Add New Project** → **Import Git Repository**.
-2. Authorize Vercel to access your GitHub account and select the `collabsphere` repo.
-3. Set the **Root Directory** to `frontend` and configure your environment variables (`VITE_API_BASE_URL`, `VITE_WS_URL`).
-4. Click **Deploy**. From this point on, every `git push` to `main` will automatically trigger a new production build and deploy.
-5. Vercel also creates **preview deployments** for every pull request — great for testing features before merging.
-
-For the **backend** (e.g., Render):
-1. Go to [render.com](https://render.com) → **New Web Service** → connect your GitHub repo.
-2. Set the root directory to `backend`, build command to `pip install -r requirements.txt`, and start command to `uvicorn app.main:app --host 0.0.0.0 --port $PORT`.
-3. Add all environment variables in the Render dashboard.
-4. Enable **Auto-Deploy** — Render will redeploy the backend on every push to `main` automatically.
-
-Once both are connected, your full workflow becomes: **write code → git push → live in production**. No manual deploys ever again.
+> These are features **not yet built** — they represent the roadmap for where CollabSphere is headed. None of these exist in the current version. They are listed here for contributors, collaborators, and anyone who wants to understand the vision of the platform.
 
 ---
 
-### 🗺️ Planned Features
+### 🔗 GitHub Integration — Sync Commits & PRs to CollabSphere Tasks
+
+The biggest planned advancement is a **native GitHub integration** that bridges your code activity directly with your CollabSphere workspace. The idea is simple: when your team pushes code to GitHub, CollabSphere should know about it — automatically.
+
+**What this would look like in practice:**
+
+- A developer commits code with a message like `fix: resolve login bug [TASK-42]` → CollabSphere automatically moves Task #42 from *In Progress* to *Review* on the Kanban board.
+- A pull request is opened on GitHub → a linked activity entry appears on the related CollabSphere task, showing the PR title, author, and status.
+- A PR is merged → the linked task is marked *Completed* and the assignee gets a CollabSphere notification.
+- A GitHub issue is created → it can be imported as a CollabSphere task directly inside the project.
+- The task detail panel shows a **"Linked Commits"** section — a live feed of every commit, branch, and PR tied to that task.
+
+**How it would be built (technical plan):**
+
+- **GitHub Webhooks** — GitHub sends a POST request to a CollabSphere endpoint (`/api/v1/integrations/github/webhook`) on every push, PR open/merge, and issue event.
+- **Task keyword matching** — the backend parses commit messages and PR titles for task references (e.g., `[TASK-42]`, `closes #42`, `fix TASK-42`) and updates the matched task automatically.
+- **OAuth App** — users connect their GitHub account to CollabSphere via GitHub OAuth, allowing per-workspace repo linking from the Settings page.
+- **Repo linking UI** — inside workspace Settings, a new "Integrations" tab lets the owner link one or more GitHub repositories to the workspace.
+- **Activity log enrichment** — all GitHub events (commits, PRs, merges) are stored in the existing `activity_logs` collection and surfaced in the task detail panel and analytics dashboard.
+
+This would make CollabSphere a true **developer-first** project management tool — where your Kanban board stays in sync with your codebase without any manual updates.
+
+---
+
+### 🗺️ Other Planned Features
 
 #### Authentication & Security
 - [ ] **Email verification on registration** — OTP or magic link via the existing Gmail OAuth2 setup
@@ -622,7 +648,6 @@ Once both are connected, your full workflow becomes: **write code → git push �
 - [ ] **@mentions in comments** — Notify specific teammates inline
 - [ ] **Threaded comments** — Reply chains on tasks
 - [ ] **Reaction emojis** on comments and chat messages
-- [ ] **Activity feed per task** — Full audit trail of every change on a task
 - [ ] **Shared document editing** — Real-time collaborative markdown (like Google Docs, powered by WebSockets + OT/CRDT)
 
 #### Tasks & Projects
@@ -639,7 +664,6 @@ Once both are connected, your full workflow becomes: **write code → git push �
 - [ ] **Notification preferences** — Per-user, per-workspace granular controls (e.g., mute a project)
 
 #### Files & Storage
-- [ ] **S3-compatible storage option** — Allow self-hosters to swap Cloudinary for AWS S3 or Backblaze B2
 - [ ] **File preview in-app** — Inline image previews and PDF viewer inside the task panel
 - [ ] **Version history for documents** — Track and restore previous versions of markdown docs
 
@@ -647,13 +671,6 @@ Once both are connected, your full workflow becomes: **write code → git push �
 - [ ] **Exportable reports** — Download project analytics as PDF or CSV
 - [ ] **Burndown charts** — Sprint progress visualization
 - [ ] **Member performance insights** — Tasks completed per user over time
-
-#### Infrastructure
-- [ ] **Docker Compose setup** — One-command local dev environment (`docker-compose up`)
-- [ ] **GitHub Actions CI** — Run linting, tests, and type checks on every pull request
-- [ ] **End-to-end tests** — Playwright test suite for critical user flows
-- [ ] **Rate limiting** — Per-user API rate limits to prevent abuse
-- [ ] **Redis caching** — Cache frequent queries (workspace lists, user lookups) for faster response times
 
 ---
 
