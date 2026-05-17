@@ -6,8 +6,39 @@
 ![Stack](https://img.shields.io/badge/Frontend-React%2018%20%2B%20Vite-61dafb?style=flat-square)
 ![Stack](https://img.shields.io/badge/Database-MongoDB-47A248?style=flat-square)
 ![Stack](https://img.shields.io/badge/Realtime-WebSockets-f7df1e?style=flat-square)
+![Stack](https://img.shields.io/badge/Storage-Cloudinary-3448C5?style=flat-square)
+![Stack](https://img.shields.io/badge/Email-Gmail%20OAuth2-EA4335?style=flat-square)
 
 ---
+
+## 🌐 Live Demo
+
+> **🔗 [https://collabsphere-sigma-ebon.vercel.app/](https://collabsphere-sigma-ebon.vercel.app/)**
+
+Try the live deployment — no setup required. Create an account and explore the full platform instantly.
+
+---
+
+## 📸 Screenshots
+
+### Landing Page
+![LandingPage](screenshots/Landing Page.png)
+
+### Dashboard
+![Dashboard](screenshots/Dashboard.png)
+
+### Kanban Board
+![Kanban Board](screenshots/Kanban.png)
+
+### Analytics
+![Analytics](screenshots/Analytics.png)
+
+### Documents
+![Documents](screenshots/Documents.png)
+
+### Workspace Chat
+![Chat](screenshots/WorkspaceChat.png)
+
 
 ## ✨ Features
 
@@ -20,8 +51,10 @@
 - 📝 **Documentation** — Markdown editor with split-pane live preview per project
 - 💬 **Team Chat** — Floating real-time workspace chat panel
 - 🔔 **Notifications** — Smart in-app notification system for assignments, comments, completions
-- 📎 **File Management** — Local file upload/download with type validation attached to tasks
+- 📎 **File Management** — Cloudinary-powered file upload/download with type validation attached to tasks
 - ⚡ **WebSocket** — Live updates for tasks, presence indicators, typing indicators
+- ✉️ **Email Notifications** — Gmail OAuth2-powered transactional emails for workspace invites and in-app notifications
+- 🔗 **Workspace Invitations** — Token-based invite system with dedicated accept flow
 
 ### Task Features
 - Create / Edit / Delete tasks with full metadata
@@ -31,7 +64,7 @@
 - Due dates with overdue highlighting
 - Tags / Labels
 - Task comments with author attribution
-- File attachments per task
+- File attachments per task (stored on Cloudinary)
 - Task detail slide-in panel
 
 ### UI/UX
@@ -51,14 +84,14 @@ collabsphere/
 ├── backend/                  # FastAPI Python application
 │   ├── app/
 │   │   ├── main.py           # Application entry point
-│   │   ├── config.py         # Settings / environment
+│   │   ├── config.py         # Settings / environment variables
 │   │   ├── database.py       # MongoDB connection + indexes
 │   │   ├── routers/          # API route handlers
 │   │   │   ├── auth.py       # Register, login, profile
 │   │   │   ├── workspaces.py # Workspace CRUD + members
 │   │   │   ├── projects.py   # Project CRUD + analytics
 │   │   │   ├── tasks.py      # Task CRUD + comments
-│   │   │   ├── files.py      # File upload/download
+│   │   │   ├── files.py      # Cloudinary file upload/download
 │   │   │   ├── documents.py  # Markdown docs
 │   │   │   ├── notifications.py # Notifications + chat + analytics
 │   │   │   └── websocket.py  # WS endpoint
@@ -68,10 +101,11 @@ collabsphere/
 │   │   │   └── auth_middleware.py # JWT dependency injection
 │   │   ├── utils/
 │   │   │   ├── auth.py       # JWT + password hashing
+│   │   │   ├── email.py      # Gmail OAuth2 email sender
 │   │   │   └── helpers.py    # Serialization, utilities
 │   │   └── websocket/
 │   │       └── manager.py    # WebSocket connection manager
-│   ├── uploads/              # Local file storage
+│   ├── uploads/              # Temporary local storage (files go to Cloudinary)
 │   ├── requirements.txt
 │   └── .env
 │
@@ -92,7 +126,8 @@ collabsphere/
     │   │   ├── DocumentsPage.jsx
     │   │   ├── NotificationsPage.jsx
     │   │   ├── ProfilePage.jsx
-    │   │   └── SettingsPage.jsx
+    │   │   ├── SettingsPage.jsx
+    │   │   └── AcceptInvite.jsx   # Workspace invite accept flow
     │   ├── components/
     │   │   ├── layout/        # AppLayout, Sidebar, TopBar
     │   │   ├── ui/            # Reusable components
@@ -115,6 +150,7 @@ collabsphere/
     │       └── helpers.js     # Formatters, utilities
     ├── package.json
     ├── vite.config.js
+    ├── vercel.json            # Vercel deployment config
     ├── tailwind.config.js
     └── .env
 ```
@@ -126,7 +162,9 @@ collabsphere/
 ### Prerequisites
 - Python 3.12+
 - Node.js 18+
-- MongoDB 6+ running locally
+- MongoDB 6+ running locally (or a MongoDB Atlas connection string)
+- A Cloudinary account (free tier works great)
+- A Google Cloud project with Gmail API enabled (for email features)
 
 ### 1. Clone and navigate
 
@@ -150,13 +188,12 @@ pip install -r requirements.txt
 
 # Configure environment
 cp .env.example .env              # Edit values as needed
-# Ensure MongoDB is running on localhost:27017
 
 # Start the server
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-The API will be available at `http://localhost:8000`
+The API will be available at `http://localhost:8000`  
 Interactive docs: `http://localhost:8000/api/docs`
 
 ### 3. Frontend Setup
@@ -183,13 +220,27 @@ The app will be available at `http://localhost:5173`
 ### Backend (`backend/.env`)
 
 ```env
+# App
 MONGODB_URL=mongodb://localhost:27017
 DATABASE_NAME=collabsphere
 SECRET_KEY=your-super-secret-key-change-in-production-min-32-chars
 ALGORITHM=HS256
 ACCESS_TOKEN_EXPIRE_MINUTES=10080
-UPLOAD_DIR=uploads
+
+# File Uploads (Cloudinary)
+CLOUDINARY_CLOUD_NAME=your_cloud_name
+CLOUDINARY_API_KEY=your_api_key
+CLOUDINARY_API_SECRET=your_api_secret
 MAX_UPLOAD_SIZE=10485760
+
+# Email (Gmail OAuth2)
+GMAIL_CLIENT_ID=your_google_client_id
+GMAIL_CLIENT_SECRET=your_google_client_secret
+GMAIL_REFRESH_TOKEN=your_gmail_refresh_token
+GMAIL_USER=your_gmail_address@gmail.com
+
+# App URLs
+FRONTEND_URL=http://localhost:5173
 CORS_ORIGINS=http://localhost:5173,http://localhost:3000
 ```
 
@@ -199,6 +250,45 @@ CORS_ORIGINS=http://localhost:5173,http://localhost:3000
 VITE_API_BASE_URL=http://localhost:8000/api/v1
 VITE_WS_URL=ws://localhost:8000
 ```
+
+---
+
+## ☁️ Cloud Services
+
+### Cloudinary (File Storage)
+
+CollabSphere uses **Cloudinary** for all file attachments — no files are stored on disk in production. When a user uploads a file to a task or project:
+
+1. The file is received by the FastAPI backend.
+2. It is uploaded to Cloudinary with a unique `public_id` under the `collabsphere/` folder.
+3. Cloudinary returns a permanent `secure_url` that is stored in MongoDB.
+4. Downloads redirect directly to the Cloudinary URL.
+5. On deletion, the file is removed from both MongoDB and Cloudinary via `cloudinary.uploader.destroy`.
+
+**Supported file types:** Images (jpg, png, gif, webp), PDFs, text/CSV/Markdown, Office documents (doc, docx, xls, xlsx, ppt, pptx), archives (zip, rar, 7z), code files (py, js, ts, html, css, json, yaml), and more.
+
+**Max file size:** 10 MB per upload.
+
+To set up Cloudinary:
+1. Sign up at [cloudinary.com](https://cloudinary.com) (free tier: 25 GB storage, 25 GB bandwidth/month).
+2. Go to your Dashboard → copy **Cloud Name**, **API Key**, and **API Secret**.
+3. Paste them into `backend/.env`.
+
+### Gmail API (Transactional Email)
+
+CollabSphere uses the **Gmail API with OAuth2** (not SMTP) for sending emails. Two types of emails are sent:
+
+- **Workspace Invitation Email** — sent when a user invites someone to a workspace; contains a styled HTML email with a tokenized accept link valid for 7 days.
+- **In-App Notification Email** — sent for events like task assignments, comments, and completions.
+
+The OAuth2 flow uses a long-lived refresh token to obtain fresh access tokens on every send — no password storage required.
+
+To set up Gmail API:
+1. Go to [Google Cloud Console](https://console.cloud.google.com) → Create a project.
+2. Enable the **Gmail API**.
+3. Create **OAuth 2.0 credentials** (Desktop App type).
+4. Use the OAuth Playground or a local script to obtain a **refresh token** with the `https://www.googleapis.com/auth/gmail.send` scope.
+5. Add the `client_id`, `client_secret`, `refresh_token`, and your Gmail address to `backend/.env`.
 
 ---
 
@@ -285,7 +375,26 @@ VITE_WS_URL=ws://localhost:8000
 }
 ```
 
-**comments** · **notifications** · **activity_logs** · **files** · **chat_messages** · **documents**
+**files**
+```json
+{
+  "_id": "ObjectId",
+  "original_name": "string",
+  "stored_name": "string (cloudinary public_id)",
+  "content_type": "string",
+  "size": "number",
+  "task_id": "string",
+  "project_id": "string",
+  "workspace_id": "string",
+  "uploaded_by": "string",
+  "uploader_name": "string",
+  "url": "string (permanent Cloudinary URL)",
+  "cloudinary_public_id": "string",
+  "created_at": "datetime"
+}
+```
+
+**comments** · **notifications** · **activity_logs** · **chat_messages** · **documents**
 
 ---
 
@@ -309,11 +418,20 @@ VITE_WS_URL=ws://localhost:8000
 | GET | `/api/v1/workspaces/{id}` | Get workspace |
 | PUT | `/api/v1/workspaces/{id}` | Update workspace |
 | DELETE | `/api/v1/workspaces/{id}` | Delete workspace |
-| POST | `/api/v1/workspaces/{id}/invite` | Invite member |
+| POST | `/api/v1/workspaces/{id}/invite` | Invite member (sends email) |
 | GET | `/api/v1/workspaces/{id}/activity` | Get activity log |
 
-### Projects, Tasks, Documents, Files
-> Full CRUD + analytics. See `/api/docs` for complete reference.
+### Files
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/v1/files/upload` | Upload file to Cloudinary |
+| GET | `/api/v1/files/task/{task_id}` | Get files attached to a task |
+| GET | `/api/v1/files/project/{project_id}` | Get files in a project |
+| GET | `/api/v1/files/{file_id}/download` | Redirect to Cloudinary download URL |
+| DELETE | `/api/v1/files/{file_id}` | Delete from MongoDB + Cloudinary |
+
+### Projects, Tasks, Documents
+> Full CRUD + analytics. See `/api/docs` for the complete interactive reference.
 
 ### WebSocket
 ```
@@ -376,7 +494,8 @@ ws://localhost:8000/ws/{workspace_id}?token={jwt_token}
 | ODM/Driver | Motor 3.4 (async) |
 | Authentication | JWT (python-jose) |
 | Password Hashing | Passlib + bcrypt |
-| File Handling | aiofiles |
+| File Storage | Cloudinary SDK |
+| Email | Gmail API (OAuth2) via httpx |
 | WebSockets | FastAPI native |
 | Validation | Pydantic v2 |
 
@@ -390,7 +509,8 @@ pip install fastapi==0.111.0 uvicorn[standard]==0.30.1 motor==3.4.0 \
   pymongo==4.7.2 pydantic==2.7.1 pydantic-settings==2.3.0 \
   python-jose[cryptography]==3.3.0 passlib[bcrypt]==1.7.4 \
   python-multipart==0.0.9 aiofiles==23.2.1 python-dotenv==1.0.1 \
-  websockets==12.0 bcrypt==4.1.3 email-validator==2.1.1
+  websockets==12.0 bcrypt==4.1.3 email-validator==2.1.1 \
+  cloudinary httpx
 ```
 
 ### Frontend
@@ -412,19 +532,25 @@ Use MongoDB Atlas (free tier) for production:
 
 ### Backend (Render / Railway / EC2)
 ```bash
-# Procfile
+# Procfile or render.yaml start command
 web: uvicorn app.main:app --host 0.0.0.0 --port $PORT
 
 # Or run directly
 uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4
 ```
 
-### Frontend (Vercel / Netlify)
+Set all environment variables (MongoDB, Cloudinary, Gmail, JWT secret) in your hosting platform's dashboard.
+
+### Frontend (Vercel)
+The project includes a `vercel.json` for zero-config Vercel deployment.
+
 ```bash
 npm run build
-# Deploy the `dist/` folder
+# Deploy the `dist/` folder, or connect repo directly to Vercel
+```
 
-# Set environment variable:
+Set environment variables in Vercel dashboard:
+```env
 VITE_API_BASE_URL=https://your-api-domain.com/api/v1
 VITE_WS_URL=wss://your-api-domain.com
 ```
@@ -443,17 +569,91 @@ CORS_ORIGINS=https://your-frontend-domain.com
 - Use `Cmd+K` / `Ctrl+K` to open command palette
 - WebSocket reconnects automatically on disconnect
 - All MongoDB operations are async (Motor)
-- Files stored in `backend/uploads/` — add to `.gitignore`
+- Files are uploaded to Cloudinary — the local `uploads/` folder is only a fallback; add it to `.gitignore`
 - JWT tokens expire in 7 days by default
+- Email sending is non-blocking; failures are logged but do not break the API response
 
 ---
 
 ## 📋 Known Limitations
 
-- File storage is local only (no S3/CDN in this version)
-- No email verification flow (can be added with SendGrid/Resend)
+- No email verification flow on register (can be added with the existing Gmail OAuth2 setup)
 - No 2FA (architecture supports adding it)
 - WebSocket state resyncs on reconnect (not event-sourced)
+- Cloudinary free tier has monthly bandwidth limits; upgrade for high-traffic production use
+
+---
+
+## 🔮 Future Advancements
+
+This section tracks planned improvements and the roadmap for CollabSphere. Contributions and suggestions are welcome!
+
+### 🔄 CI/CD — Auto-Deploy on Every GitHub Push
+
+Currently the frontend is deployed manually to Vercel. The goal is to connect the GitHub repository directly so that every push to `main` triggers an automatic production deployment — no manual steps required.
+
+**How to set this up (Vercel + GitHub):**
+
+1. Go to [vercel.com](https://vercel.com) → **Add New Project** → **Import Git Repository**.
+2. Authorize Vercel to access your GitHub account and select the `collabsphere` repo.
+3. Set the **Root Directory** to `frontend` and configure your environment variables (`VITE_API_BASE_URL`, `VITE_WS_URL`).
+4. Click **Deploy**. From this point on, every `git push` to `main` will automatically trigger a new production build and deploy.
+5. Vercel also creates **preview deployments** for every pull request — great for testing features before merging.
+
+For the **backend** (e.g., Render):
+1. Go to [render.com](https://render.com) → **New Web Service** → connect your GitHub repo.
+2. Set the root directory to `backend`, build command to `pip install -r requirements.txt`, and start command to `uvicorn app.main:app --host 0.0.0.0 --port $PORT`.
+3. Add all environment variables in the Render dashboard.
+4. Enable **Auto-Deploy** — Render will redeploy the backend on every push to `main` automatically.
+
+Once both are connected, your full workflow becomes: **write code → git push → live in production**. No manual deploys ever again.
+
+---
+
+### 🗺️ Planned Features
+
+#### Authentication & Security
+- [ ] **Email verification on registration** — OTP or magic link via the existing Gmail OAuth2 setup
+- [ ] **Two-factor authentication (2FA)** — TOTP-based (Google Authenticator / Authy)
+- [ ] **OAuth login** — Sign in with Google / GitHub
+- [ ] **Session management** — View and revoke active sessions per device
+
+#### Collaboration
+- [ ] **@mentions in comments** — Notify specific teammates inline
+- [ ] **Threaded comments** — Reply chains on tasks
+- [ ] **Reaction emojis** on comments and chat messages
+- [ ] **Activity feed per task** — Full audit trail of every change on a task
+- [ ] **Shared document editing** — Real-time collaborative markdown (like Google Docs, powered by WebSockets + OT/CRDT)
+
+#### Tasks & Projects
+- [ ] **Recurring tasks** — Daily / weekly / monthly task templates
+- [ ] **Task dependencies** — Block a task until another is completed
+- [ ] **Time tracking** — Log hours per task with a built-in timer
+- [ ] **Subtasks** — Nested checklist inside a task
+- [ ] **Gantt / Timeline view** — Visual project timeline alongside Kanban
+- [ ] **Calendar view** — See tasks by due date in a monthly calendar
+
+#### Notifications & Email
+- [ ] **Email digest** — Daily or weekly summary email of workspace activity
+- [ ] **Push notifications** — Browser push (PWA) and mobile notifications
+- [ ] **Notification preferences** — Per-user, per-workspace granular controls (e.g., mute a project)
+
+#### Files & Storage
+- [ ] **S3-compatible storage option** — Allow self-hosters to swap Cloudinary for AWS S3 or Backblaze B2
+- [ ] **File preview in-app** — Inline image previews and PDF viewer inside the task panel
+- [ ] **Version history for documents** — Track and restore previous versions of markdown docs
+
+#### Analytics & Reporting
+- [ ] **Exportable reports** — Download project analytics as PDF or CSV
+- [ ] **Burndown charts** — Sprint progress visualization
+- [ ] **Member performance insights** — Tasks completed per user over time
+
+#### Infrastructure
+- [ ] **Docker Compose setup** — One-command local dev environment (`docker-compose up`)
+- [ ] **GitHub Actions CI** — Run linting, tests, and type checks on every pull request
+- [ ] **End-to-end tests** — Playwright test suite for critical user flows
+- [ ] **Rate limiting** — Per-user API rate limits to prevent abuse
+- [ ] **Redis caching** — Cache frequent queries (workspace lists, user lookups) for faster response times
 
 ---
 
@@ -473,4 +673,4 @@ MIT License — See LICENSE file for details.
 
 ---
 
-*Built with ❤️ using FastAPI, React, and MongoDB*
+*Built with ❤️ using FastAPI, React, MongoDB, Cloudinary, and Gmail API*
