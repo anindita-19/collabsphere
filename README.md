@@ -39,28 +39,6 @@ Try the live deployment — no setup required. Create an account and explore the
 ### Workspace Chat
 ![Chat](screenshots/chat.png)
 
----
-
-> **📁 How to make screenshots show up on GitHub:**
->
-> 1. Create a folder named `screenshots/` at the root of your project (same level as `backend/` and `frontend/`).
-> 2. Save your screenshots using **exactly these filenames** (no spaces — use underscores):
->    - `landing_page.png`
->    - `dashboard.png`
->    - `kanban.png`
->    - `analytics.png`
->    - `documents.png`
->    - `chat.png`
-> 3. ⚠️ **Never use spaces in filenames** — `Landing Page.png` will break rendering. Always use `landing_page.png` style.
-> 4. Commit and push the folder:
->    ```bash
->    git add screenshots/
->    git commit -m "docs: add screenshots"
->    git push
->    ```
-> 5. Refresh your GitHub repo page — images render inline automatically. Filenames are **case-sensitive** on GitHub (`dashboard.png` ≠ `Dashboard.png`).
-
----
 
 ## ✨ Features
 
